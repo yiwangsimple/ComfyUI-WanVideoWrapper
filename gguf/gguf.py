@@ -56,7 +56,6 @@ def set_lora_params(module, patches, module_prefix=""):
         set_lora_params(child, patches, child_prefix)
     if isinstance(module, GGUFLinear):
         key = f"diffusion_model.{module_prefix}weight"
-        print("Setting LoRA params for key:", key)
         patch = patches.get(key, [])
         if len(patch) != 0:
             lora_diffs = []
