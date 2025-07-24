@@ -1282,9 +1282,10 @@ class WanVideoSampler:
         transformer_options = patcher.model_options.get("transformer_options", None)
 
         if len(patcher.patches) != 0 and transformer_options.get("linear_with_lora", False) is True:
-            log.info(f"Using {len(patcher.patches)} patches for WanVideo model")
+            log.info(f"Using {len(patcher.patches)} LoRA weight patches for WanVideo model")
             convert_linear_with_lora_and_scale(transformer, patches=patcher.patches)
         else:
+            log.info("Unloading all LoRAs")
             remove_lora_from_module(transformer)
 
         #compile

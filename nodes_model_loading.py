@@ -801,9 +801,6 @@ class WanVideoModelLoader:
         if "scaled_fp8" in sd and "scaled" not in quantization:
             raise ValueError("The model is a scaled fp8 model, please set quantization to '_scaled'")
 
-        if merge_loras and "scaled" in quantization:
-            raise ValueError("scaled models currently do not support merging LoRAs, please disable merging or use a non-scaled model")
-
         if "vace_blocks.0.after_proj.weight" in sd and not "patch_embedding.weight" in sd:
             raise ValueError("You are attempting to load a VACE module as a WanVideo model, instead you should use the vace_model input and matching T2V base model")
 
@@ -1033,6 +1030,13 @@ class WanVideoModelLoader:
         patcher.model.is_patched = False
 
         control_lora = False
+
+        scale_weights = {}
+        if "scaled" in quantization:
+            scale_weights = {}
+            for k, v in sd.items():
+                if k.endswith(".scale_weight"):
+                    scale_weights[k] = v
         
         if lora is not None:
             for l in lora:
@@ -1087,9 +1091,12 @@ class WanVideoModelLoader:
                 
                 del lora_sd
             
-            if not gguf and not "scaled" in quantization and merge_loras:
+            if not gguf and merge_loras:
                 log.info("Patching LoRA to the model...")
-                patcher = apply_lora(patcher, device, transformer_load_device, params_to_keep=params_to_keep, dtype=dtype, base_dtype=base_dtype, state_dict=sd, low_mem_load=lora_low_mem_load, control_lora=control_lora)
+                patcher = apply_lora(
+                    patcher, device, transformer_load_device, 
+                    params_to_keep=params_to_keep, dtype=dtype, base_dtype=base_dtype, state_dict=sd, 
+                    low_mem_load=lora_low_mem_load, control_lora=control_lora, scale_weights=scale_weights)
         
         if gguf:
             #from diffusers.quantizers.gguf.utils import _replace_with_gguf_linear, GGUFParameter
@@ -1130,11 +1137,7 @@ class WanVideoModelLoader:
             print(params_to_keep)
             convert_fp8_linear(patcher.model.diffusion_model, base_dtype, params_to_keep=params_to_keep)
         
-        if "scaled" in quantization:
-            scale_weights = {}
-            for k, v in sd.items():
-                if k.endswith(".scale_weight"):
-                    scale_weights[k] = v
+        if "scaled" in quantization and not merge_loras:
             log.info("Using FP8 scaled linear quantization")
             convert_linear_with_lora_and_scale(patcher.model.diffusion_model, scale_weights, params_to_keep=params_to_keep, patches=patcher.patches)
         elif lora is not None and not merge_loras and not gguf:
@@ -1223,13 +1226,46 @@ class WanVideoModelLoader:
 
         if 'transformer_options' not in patcher.model_options:
             patcher.model_options['transformer_options'] = {}
-        patcher.model_options["transformer_options"]["block_swap_args"] = block_swap_args   
+        patcher.model_options["transformer_options"]["block_swap_args"] = block_swap_args
+        patcher.model_options["transformer_options"]["linear_with_lora"] = True if not merge_loras else False
 
         for model in mm.current_loaded_models:
             if model._model() == patcher:
                 mm.current_loaded_models.remove(model)            
 
         return (patcher,)
+    
+# class WanVideoSaveModel:
+#     @classmethod
+#     def INPUT_TYPES(s):
+#         return {
+#             "required": {
+#                 "model": ("WANVIDEOMODEL", {"tooltip": "WANVideo model to save"}),
+#                 "output_path": ("STRING", {"default": "", "multiline": False, "tooltip": "Path to save the model"}),
+#             },
+#         }
+
+#     RETURN_TYPES = ()
+#     FUNCTION = "savemodel"
+#     CATEGORY = "WanVideoWrapper"
+#     DESCRIPTION = "Saves the model including merged LoRAs and quantization to diffusion_models/WanVideoWrapperSavedModels"
+#     OUTPUT_NODE = True
+
+#     def savemodel(self, model, output_path):
+#         from safetensors.torch import save_file
+#         model_sd = model.model.diffusion_model.state_dict()
+#         for k in model_sd.keys():
+#             print("key:", k, "shape:", model_sd[k].shape, "dtype:", model_sd[k].dtype, "device:", model_sd[k].device)
+#         model_sd
+#         model_name = os.path.basename(model.model["model_name"])
+#         if not output_path:
+#             output_path = os.path.join(folder_paths.models_dir, "diffusion_models", "WanVideoWrapperSavedModels", "saved_" + model_name)
+#         else:
+#             output_path = os.path.join(output_path, model_name)
+#         log.info(f"Saving model to {output_path}")
+#         os.makedirs(os.path.dirname(output_path), exist_ok=True)
+#         save_file(model_sd, output_path)
+#         return ()
     
 #region load VAE
 
