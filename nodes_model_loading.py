@@ -755,7 +755,8 @@ class WanVideoModelLoader:
                 raise ValueError("Quantization should be disabled when loading GGUF models.")
             quantization = "gguf"
             gguf = True
-            merge_loras = False
+            if merge_loras is True:
+                raise ValueError("GGUF models do not support LoRA merging, please disable merge_loras in the LoRA select node.")
 
                 
         manual_offloading = True
@@ -1223,6 +1224,7 @@ class WanVideoModelLoader:
         patcher.model["auto_cpu_offload"] = True if vram_management_args is not None else False
         patcher.model["control_lora"] = control_lora
         patcher.model["compile_args"] = compile_args
+        patcher.model["gguf"] = gguf
 
         if 'transformer_options' not in patcher.model_options:
             patcher.model_options['transformer_options'] = {}
