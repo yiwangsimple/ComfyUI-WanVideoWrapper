@@ -1425,7 +1425,7 @@ class WanVideoSampler:
         else: #t2v
             target_shape = image_embeds.get("target_shape", None)
             if target_shape is None:
-                raise ValueError("Empty image embeds must be provided for T2V (Text to Video")
+                raise ValueError("Empty image embeds must be provided for T2V models")
             
             has_ref = image_embeds.get("has_ref", False)
             vace_context = image_embeds.get("vace_context", None)
@@ -1758,7 +1758,12 @@ class WanVideoSampler:
             for block in transformer.vace_blocks:
                 block.rope_func = rope_function
 
-        #blockswap init        
+        #blockswap init
+        
+        mm.unload_all_models()
+        mm.soft_empty_cache()
+        gc.collect()
+        
         if transformer_options is not None:
             block_swap_args = transformer_options.get("block_swap_args", None)
 
@@ -2249,7 +2254,6 @@ class WanVideoSampler:
             shift_idx = 0
 
         #clear memory before sampling
-        mm.unload_all_models()
         mm.soft_empty_cache()
         gc.collect()
         try:
@@ -2846,17 +2850,14 @@ class WanVideoSampler:
                 
                 if flowedit_args is None:
                     latent = latent.to(intermediate_device)
-                    temp_x0 = sample_scheduler.step(
+                    latent = sample_scheduler.step(
                         noise_pred[:, :orig_noise_len].unsqueeze(0) if recammaster is not None else noise_pred.unsqueeze(0),
                         timestep,
                         latent[:, :orig_noise_len].unsqueeze(0) if recammaster is not None else latent.unsqueeze(0),
-                        **scheduler_step_args)[0]
-                    latent = temp_x0.squeeze(0)
-
-                    x0 = latent.to(device)
+                        **scheduler_step_args)[0].squeeze(0)
                     
                     if freeinit_args is not None:
-                        current_latent = x0.clone()
+                        current_latent = latent.clone()
 
                     if callback is not None:
                         if recammaster is not None:
@@ -2877,7 +2878,7 @@ class WanVideoSampler:
                         pbar.update(1)
 
         if phantom_latents is not None:
-            x0 = x0[:,:-phantom_latents.shape[1]]
+            latent = latent[:,:-phantom_latents.shape[1]]
                 
         if cache_args is not None:
             cache_report(transformer, cache_args)
@@ -2897,7 +2898,7 @@ class WanVideoSampler:
             pass
 
         return ({
-            "samples": x0.unsqueeze(0).cpu(), 
+            "samples": latent.unsqueeze(0).cpu(), 
             "looped": is_looped, 
             "end_image": end_image if not fun_or_fl2v_model else None, 
             "has_ref": has_ref, 
