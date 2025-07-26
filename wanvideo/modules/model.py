@@ -461,7 +461,7 @@ class WanT2VCrossAttention(WanSelfAttention):
         super().__init__(in_features, out_features, num_heads, qk_norm, eps)
         self.attention_mode = attention_mode
 
-    def forward(self, x, context, grid_sizes, clip_embed=None, audio_proj=None, audio_scale=1.0, 
+    def forward(self, x, context, grid_sizes=None, clip_embed=None, audio_proj=None, audio_scale=1.0, 
                 num_latent_frames=21, nag_params={}, nag_context=None, is_uncond=False, rope_func="comfy", inner_t=None, inner_c=None, cross_freqs=None):
         b, n, d = x.size(0), self.num_heads, self.head_dim
         # compute query
