@@ -2997,6 +2997,8 @@ class WanVideoEncode:
             log.warning(f"Image size {W}x{H} is not divisible by 16, resizing to {new_width}x{new_height}")
             image = common_upscale(image.movedim(-1, 1), new_width, new_height, "lanczos", "disabled").movedim(1, -1)
 
+        if image.shape[-1] == 4:
+            image = image[..., :3]
         image = image.to(vae.dtype).to(device).unsqueeze(0).permute(0, 4, 1, 2, 3) # B, C, T, H, W
 
 
