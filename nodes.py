@@ -1632,7 +1632,7 @@ class WanVideoSampler:
             num_prompts = len(text_embeds["prompt_embeds"])
             log.info(f"Number of prompts: {num_prompts}")
             # Calculate which section this context window belongs to
-            section_size = latent_video_length / num_prompts
+            section_size = (latent_video_length / num_prompts) if num_prompts != 0 else 1
             log.info(f"Section size: {section_size}")
             is_looped = context_schedule == "uniform_looped"
 
@@ -1980,7 +1980,10 @@ class WanVideoSampler:
                         add_cond_input = add_cond
 
                 if minimax_latents is not None:
-                    z_pos = z_neg = torch.cat([z, minimax_latents, minimax_mask_latents], dim=0)
+                    if context_window is not None:
+                        z_pos = z_neg = torch.cat([z, minimax_latents[:, context_window], minimax_mask_latents[:, context_window]], dim=0)
+                    else:
+                        z_pos = z_neg = torch.cat([z, minimax_latents, minimax_mask_latents], dim=0)
                 
                 if not multitalk_sampling and multitalk_audio_embedding is not None:
                     audio_embedding = multitalk_audio_embedding
