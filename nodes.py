@@ -12,7 +12,7 @@ from .fp8_optimization import convert_linear_with_lora_and_scale, remove_lora_fr
 from .wanvideo.schedulers import get_scheduler, get_sampling_sigmas, retrieve_timesteps, scheduler_list
 from .gguf.gguf import set_lora_params
 from .multitalk.multitalk import timestep_transform, add_noise
-from .utils import log, print_memory, apply_lora, clip_encode_image_tiled, fourier_filter, is_image_black, add_noise_to_reference_video, optimized_scale, setup_radial_attention, compile_model
+from .utils import log, print_memory, apply_lora, clip_encode_image_tiled, fourier_filter, is_image_black, add_noise_to_reference_video, optimized_scale, setup_radial_attention, compile_model, dict_to_device
 from .cache_methods.cache_methods import cache_report
 from .enhance_a_video.globals import set_enhance_weight, set_num_frames
 from .taehv import TAEHV
@@ -170,6 +170,7 @@ class WanVideoTextEncode:
                 "force_offload": ("BOOLEAN", {"default": True}),
                 "model_to_offload": ("WANVIDEOMODEL", {"tooltip": "Model to move to offload_device before encoding"}),
                 "use_disk_cache": ("BOOLEAN", {"default": False, "tooltip": "Cache the text embeddings to disk for faster re-use, under the custom_nodes/ComfyUI-WanVideoWrapper/text_embed_cache directory"}),
+                "device": (["gpu", "cpu"], {"default": "gpu", "tooltip": "Device to run the text encoding on."}),
             }
         }
 
@@ -180,7 +181,7 @@ class WanVideoTextEncode:
     DESCRIPTION = "Encodes text prompts into text embeddings. For rudimentary prompt travel you can input multiple prompts separated by '|', they will be equally spread over the video length"
 
 
-    def process(self, positive_prompt, negative_prompt, t5=None, force_offload=True, model_to_offload=None, use_disk_cache=False):
+    def process(self, positive_prompt, negative_prompt, t5=None, force_offload=True, model_to_offload=None, use_disk_cache=False, device="gpu"):
         if t5 is None and not use_disk_cache:
             raise ValueError("T5 encoder is required for text encoding. Please provide a valid T5 encoder or enable disk cache.")
 
@@ -259,7 +260,12 @@ class WanVideoTextEncode:
             all_weights.append(weights)
 
         mm.soft_empty_cache()
-        encoder.model.to(device)
+
+        if device == "gpu":
+            device = mm.get_torch_device()
+            encoder.model.to(device)
+        elif device == "cpu":
+            encoder.model.to(torch.device("cpu"))
 
         with torch.autocast(device_type=mm.get_autocast_device(device), dtype=dtype, enabled=True):
             # Encode positive if not loaded from cache
@@ -1325,6 +1331,8 @@ class WanVideoSampler:
                 "prompt_embeds": [],
                 "negative_prompt_embeds": [],
             }
+        else:
+            text_embeds = dict_to_device(text_embeds, device)
 
         if isinstance(cfg, list):
             if steps != len(cfg):
