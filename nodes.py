@@ -1365,10 +1365,10 @@ class WanVideoSampler:
             timesteps = torch.tensor([1000, 750, 500, 250], device=device)
         log.info(f"sigmas: {sample_scheduler.sigmas}")
 
-        if end_step != -1:
+        if end_step != -1 or end_step >= steps:
             timesteps = timesteps[:end_step]
             sample_scheduler.sigmas = sample_scheduler.sigmas[:end_step+1]
-        else:
+        elif start_step > 0:
             timesteps = timesteps[start_step:]
             sample_scheduler.sigmas = sample_scheduler.sigmas[start_step:]
 
