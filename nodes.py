@@ -2209,7 +2209,7 @@ class WanVideoSampler:
             
         log.info(f"Seq len: {seq_len}")
            
-        pbar = ProgressBar(steps)
+        
 
         if args.preview_method in [LatentPreviewMethod.Auto, LatentPreviewMethod.Latent2RGB]: #default for latent2rgb
             from latent_preview import prepare_callback
@@ -2290,6 +2290,7 @@ class WanVideoSampler:
             # Set latent for denoising
             latent = current_latent
 
+            pbar = ProgressBar(len(timesteps))
             #region main loop start
             for idx, t in enumerate(tqdm(timesteps)):
                 if flowedit_args is not None:
