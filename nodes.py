@@ -2222,7 +2222,7 @@ class WanVideoSampler:
             from latent_preview import prepare_callback
         else:
             from .latent_preview import prepare_callback #custom for tiny VAE previews
-        callback = prepare_callback(patcher, steps)
+        callback = prepare_callback(patcher, len(timesteps))
 
         log.info(f"Sampling {(latent_video_length-1) * 4 + 1} frames at {latent.shape[3]*vae_upscale_factor}x{latent.shape[2]*vae_upscale_factor} with {steps} steps")
 
@@ -2860,14 +2860,14 @@ class WanVideoSampler:
                             callback_latent = (latent_model_input[:,:-phantom_latents.shape[1]].to(device) - noise_pred[:,:-phantom_latents.shape[1]].to(device) * t.to(device) / 1000).detach().permute(1,0,2,3)
                         else:
                             callback_latent = (latent_model_input.to(device) - noise_pred.to(device) * t.to(device) / 1000).detach().permute(1,0,2,3)
-                        callback(idx, callback_latent, None, steps)
+                        callback(idx, callback_latent, None, len(timesteps))
                     else:
                         pbar.update(1)
                     del latent_model_input, timestep
                 else:
                     if callback is not None:
                         callback_latent = (zt_tgt.to(device) - vt_tgt.to(device) * t.to(device) / 1000).detach().permute(1,0,2,3)
-                        callback(idx, callback_latent, None, steps)
+                        callback(idx, callback_latent, None, len(timesteps))
                     else:
                         pbar.update(1)
 
