@@ -12,7 +12,7 @@ from .fp8_optimization import convert_linear_with_lora_and_scale, remove_lora_fr
 from .wanvideo.schedulers import get_scheduler, get_sampling_sigmas, retrieve_timesteps, scheduler_list
 from .gguf.gguf import set_lora_params
 from .multitalk.multitalk import timestep_transform, add_noise
-from .utils import log, print_memory, apply_lora, clip_encode_image_tiled, fourier_filter, is_image_black, add_noise_to_reference_video, optimized_scale, setup_radial_attention, compile_model, dict_to_device
+from .utils import log, print_memory, apply_lora, clip_encode_image_tiled, fourier_filter, is_image_black, add_noise_to_reference_video, optimized_scale, setup_radial_attention, compile_model, dict_to_device, tangential_projection
 from .cache_methods.cache_methods import cache_report
 from .enhance_a_video.globals import set_enhance_weight, set_num_frames
 from .taehv import TAEHV
@@ -1221,6 +1221,7 @@ class WanVideoExperimentalArgs:
                 "fresca_scale_low": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01}),
                 "fresca_scale_high": ("FLOAT", {"default": 1.25, "min": 0.0, "max": 10.0, "step": 0.01}),
                 "fresca_freq_cutoff": ("INT", {"default": 20, "min": 0, "max": 10000, "step": 1}),
+                "use_tcfg": ("BOOLEAN", {"default": False, "tooltip": "https://arxiv.org/abs/2503.18137 TCFG: Tangential Damping Classifier-free Guidance. CFG artifacts reduction."}),
             },
         }
 
@@ -1881,7 +1882,7 @@ class WanVideoSampler:
                 timesteps[-drift_steps:] = drift_timesteps[-drift_steps:]
 
         # Experimental args
-        use_cfg_zero_star = use_fresca = False
+        use_cfg_zero_star = use_tangential = use_fresca = False
         if experimental_args is not None:
             video_attention_split_steps = experimental_args.get("video_attention_split_steps", [])
             if video_attention_split_steps:
@@ -1891,6 +1892,7 @@ class WanVideoSampler:
 
             use_zero_init = experimental_args.get("use_zero_init", True)
             use_cfg_zero_star = experimental_args.get("cfg_zero_star", False)
+            use_tangential = experimental_args.get("use_tcfg", False)
             zero_star_steps = experimental_args.get("zero_star_steps", 0)
 
             use_fresca = experimental_args.get("use_fresca", False)
@@ -2174,6 +2176,11 @@ class WanVideoSampler:
                     ).view(batch_size, 1, 1, 1)
                 else:
                     alpha = 1.0
+                
+                noise_pred_uncond_scaled = noise_pred_uncond * alpha
+
+                if use_tangential:
+                    noise_pred_uncond_scaled = tangential_projection(noise_pred_cond, noise_pred_uncond_scaled)
 
                 #https://github.com/WikiChao/FreSca
                 if use_fresca:
@@ -2183,9 +2190,9 @@ class WanVideoSampler:
                         scale_high=fresca_scale_high,
                         freq_cutoff=fresca_freq_cutoff,
                     )
-                    noise_pred = noise_pred_uncond * alpha + cfg_scale * filtered_cond * alpha
+                    noise_pred = noise_pred_uncond_scaled + cfg_scale * filtered_cond * alpha
                 else:
-                    noise_pred = noise_pred_uncond * alpha + cfg_scale * (noise_pred_cond - noise_pred_uncond * alpha)
+                    noise_pred = noise_pred_uncond_scaled + cfg_scale * (noise_pred_cond - noise_pred_uncond_scaled)
                 
 
                 return noise_pred, [cache_state_cond, cache_state_uncond]
