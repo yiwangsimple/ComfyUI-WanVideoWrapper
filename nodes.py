@@ -1320,6 +1320,7 @@ class WanVideoSampler:
         vae_upscale_factor = 16 if is_5b else 8
 
         if len(patcher.patches) != 0 and transformer_options.get("linear_with_lora", False) is True:
+            remove_lora_from_module(transformer)
             log.info(f"Using {len(patcher.patches)} LoRA weight patches for WanVideo model")
             if not gguf:
                 convert_linear_with_lora_and_scale(transformer, patches=patcher.patches)
