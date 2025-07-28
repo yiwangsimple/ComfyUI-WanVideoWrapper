@@ -849,7 +849,10 @@ class WanVideoModelLoader:
         elif "model_type.Wan2_1-FLF2V-14B-720P" in sd or "img_emb.emb_pos" in sd or "flf2v" in model.lower():
             model_type = "fl2v"
         elif in_channels in [36, 48]:
-            model_type = "i2v"
+            if "blocks.0.cross_attn.k_img.weight" not in sd:
+                model_type = "t2v"
+            else:
+                model_type = "i2v"
         elif in_channels == 16:
             model_type = "t2v"
         elif "control_adapter.conv.weight" in sd:
