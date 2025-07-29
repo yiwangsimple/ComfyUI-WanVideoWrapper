@@ -2846,7 +2846,7 @@ class WanVideoSampler:
                     latent = latent.to(intermediate_device)
                     latent = sample_scheduler.step(
                         noise_pred[:, :orig_noise_len].unsqueeze(0) if recammaster is not None else noise_pred.unsqueeze(0),
-                        t,
+                        timestep,
                         latent[:, :orig_noise_len].unsqueeze(0) if recammaster is not None else latent.unsqueeze(0),
                         **scheduler_step_args)[0].squeeze(0)
                     
