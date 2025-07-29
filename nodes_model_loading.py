@@ -1054,8 +1054,8 @@ class WanVideoModelLoader:
                     set_module_tensor_to_device(transformer, name, device=transformer_load_device, dtype=dtype_to_use, value=sd[name])
                     pbar.update(1)
 
-                for name, param in transformer.named_parameters():
-                    print(name, param.dtype, param.device, param.shape)
+                #for name, param in transformer.named_parameters():
+                #    print(name, param.dtype, param.device, param.shape)
 
         comfy_model.diffusion_model = transformer
         comfy_model.load_device = transformer_load_device
