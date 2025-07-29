@@ -1482,7 +1482,8 @@ class WanModel(ModelMixin, ConfigMixin):
             has_cond = attn_cond is not None
             if (self.cached_freqs is not None and 
                 self.cached_shape == current_shape and 
-                self.cached_cond == has_cond):
+                self.cached_cond == has_cond and
+                self.cached_rope_k == self.rope_embedder.k):
                 freqs = self.cached_freqs
             else:
                 f_len = ((F + (self.patch_size[0] // 2)) // self.patch_size[0])
@@ -1523,6 +1524,7 @@ class WanModel(ModelMixin, ConfigMixin):
                 self.cached_freqs = freqs
                 self.cached_shape = current_shape
                 self.cached_cond = has_cond
+                self.cached_rope_k = self.rope_embedder.k
             
         # EchoShot cross attn freqs
         inner_c = None
