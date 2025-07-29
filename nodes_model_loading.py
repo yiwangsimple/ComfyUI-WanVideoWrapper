@@ -1024,15 +1024,21 @@ class WanVideoModelLoader:
         )
         
         if not gguf:
+            
+            scale_weights = {}
+            if "scaled" in quantization:
+                scale_weights = {}
+                for k, v in sd.items():
+                    if k.endswith(".scale_weight"):
+                        scale_weights[k] = v
+
             if "fp8_e4m3fn" in quantization:
                 dtype = torch.float8_e4m3fn
             elif "fp8_e5m2" in quantization:
                 dtype = torch.float8_e5m2
             else:
                 dtype = base_dtype
-            params_to_keep = {"norm", "head", "bias", "time_in", "patch_embedding", "time_", "img_emb", "modulation", "text_embedding", "adapter", "add"}
-            #if lora is not None:
-            #    transformer_load_device = device
+            params_to_keep = {"norm", "bias", "time_in", "patch_embedding", "time_", "img_emb", "modulation", "text_embedding", "adapter", "add"}
             if not lora_low_mem_load:
                 log.info("Using accelerate to load and assign model weights to device...")
                 param_count = sum(1 for _ in transformer.named_parameters())
@@ -1042,12 +1048,14 @@ class WanVideoModelLoader:
                         total=param_count,
                         leave=True):
                     dtype_to_use = base_dtype if any(keyword in name for keyword in params_to_keep) else dtype
-                    if "scaled" in quantization:
-                        dtype_to_use = sd[name].dtype
+                    dtype_to_use = dtype if sd[name].dtype == dtype else dtype_to_use
                     if "patch_embedding" in name:
                         dtype_to_use = torch.float32
                     set_module_tensor_to_device(transformer, name, device=transformer_load_device, dtype=dtype_to_use, value=sd[name])
-                    pbar.update(1)              
+                    pbar.update(1)
+
+                for name, param in transformer.named_parameters():
+                    print(name, param.dtype, param.device, param.shape)
 
         comfy_model.diffusion_model = transformer
         comfy_model.load_device = transformer_load_device
@@ -1055,15 +1063,7 @@ class WanVideoModelLoader:
         patcher = comfy.model_patcher.ModelPatcher(comfy_model, device, offload_device)
         patcher.model.is_patched = False
 
-        control_lora = False
-
-        scale_weights = {}
-        if "scaled" in quantization:
-            scale_weights = {}
-            for k, v in sd.items():
-                if k.endswith(".scale_weight"):
-                    scale_weights[k] = v
-        
+        control_lora = False        
         if lora is not None:
             for l in lora:
                 log.info(f"Loading LoRA: {l['name']} with strength: {l['strength']}")
