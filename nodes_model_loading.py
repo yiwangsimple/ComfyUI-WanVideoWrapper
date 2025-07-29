@@ -1030,7 +1030,7 @@ class WanVideoModelLoader:
                 dtype = torch.float8_e5m2
             else:
                 dtype = base_dtype
-            params_to_keep = {"norm", "head", "bias", "time_in", "vector_in", "patch_embedding", "time_", "img_emb", "modulation", "text_embedding", "adapter", "add"}
+            params_to_keep = {"norm", "head", "bias", "time_in", "patch_embedding", "time_", "img_emb", "modulation", "text_embedding", "adapter", "add"}
             #if lora is not None:
             #    transformer_load_device = device
             if not lora_low_mem_load:
@@ -1042,6 +1042,8 @@ class WanVideoModelLoader:
                         total=param_count,
                         leave=True):
                     dtype_to_use = base_dtype if any(keyword in name for keyword in params_to_keep) else dtype
+                    if "scaled" in quantization:
+                        dtype_to_use = sd[name].dtype
                     if "patch_embedding" in name:
                         dtype_to_use = torch.float32
                     set_module_tensor_to_device(transformer, name, device=transformer_load_device, dtype=dtype_to_use, value=sd[name])
@@ -1163,7 +1165,7 @@ class WanVideoModelLoader:
         
         if "scaled" in quantization and not merge_loras:
             log.info("Using FP8 scaled linear quantization")
-            convert_linear_with_lora_and_scale(patcher.model.diffusion_model, scale_weights, params_to_keep=params_to_keep, patches=patcher.patches)
+            convert_linear_with_lora_and_scale(patcher.model.diffusion_model, scale_weights, patches=patcher.patches)
         elif lora is not None and not merge_loras and not gguf:
             log.info("LoRAs will be applied at runtime")
             convert_linear_with_lora_and_scale(patcher.model.diffusion_model, patches=patcher.patches)
@@ -1216,23 +1218,6 @@ class WanVideoModelLoader:
                 compile_args = compile_args,
             )
 
-        # #compile
-        # if compile_args is not None and vram_management_args is None:
-        #     torch._dynamo.config.cache_size_limit = compile_args["dynamo_cache_size_limit"]
-        #     try:
-        #         if hasattr(torch, '_dynamo') and hasattr(torch._dynamo, 'config'):
-        #             torch._dynamo.config.recompile_limit = compile_args["dynamo_recompile_limit"]
-        #     except Exception as e:
-        #         log.warning(f"Could not set recompile_limit: {e}")
-        #     if compile_args["compile_transformer_blocks_only"]:
-        #         for i, block in enumerate(patcher.model.diffusion_model.blocks):
-        #             patcher.model.diffusion_model.blocks[i] = torch.compile(block, fullgraph=compile_args["fullgraph"], dynamic=compile_args["dynamic"], backend=compile_args["backend"], mode=compile_args["mode"])
-        #         if vace_layers is not None:
-        #             for i, block in enumerate(patcher.model.diffusion_model.vace_blocks):
-        #                 patcher.model.diffusion_model.vace_blocks[i] = torch.compile(block, fullgraph=compile_args["fullgraph"], dynamic=compile_args["dynamic"], backend=compile_args["backend"], mode=compile_args["mode"])
-        #     else:
-        #         patcher.model.diffusion_model = torch.compile(patcher.model.diffusion_model, fullgraph=compile_args["fullgraph"], dynamic=compile_args["dynamic"], backend=compile_args["backend"], mode=compile_args["mode"])
-        
         if load_device == "offload_device" and patcher.model.diffusion_model.device != offload_device:
             log.info(f"Moving diffusion model from {patcher.model.diffusion_model.device} to {offload_device}")
             patcher.model.diffusion_model.to(offload_device)
