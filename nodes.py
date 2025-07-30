@@ -1294,6 +1294,7 @@ class WanVideoSampler:
                 "freeinit_args": ("FREEINITARGS", ),
                 "start_step": ("INT", {"default": 0, "min": 0, "max": 10000, "step": 1, "tooltip": "Start step for the sampling, 0 means full sampling, otherwise samples only from this step"}),
                 "end_step": ("INT", {"default": -1, "min": -1, "max": 10000, "step": 1, "tooltip": "End step for the sampling, -1 means full sampling, otherwise samples only until this step"}),
+                "add_noise_to_samples": ("BOOLEAN", {"default": False, "tooltip": "Add noise to the samples before sampling, needed for video2video sampling when starting from clean video"}),
             }
         }
 
@@ -1305,7 +1306,7 @@ class WanVideoSampler:
     def process(self, model, image_embeds, shift, steps, cfg, seed, scheduler, riflex_freq_index, text_embeds=None,
         force_offload=True, samples=None, feta_args=None, denoise_strength=1.0, context_options=None, 
         cache_args=None, teacache_args=None, flowedit_args=None, batched_cfg=False, slg_args=None, rope_function="default", loop_args=None, 
-        experimental_args=None, sigmas=None, unianimate_poses=None, fantasytalking_embeds=None, uni3c_embeds=None, multitalk_embeds=None, freeinit_args=None, start_step=0, end_step=-1):
+        experimental_args=None, sigmas=None, unianimate_poses=None, fantasytalking_embeds=None, uni3c_embeds=None, multitalk_embeds=None, freeinit_args=None, start_step=0, end_step=-1, add_noise_to_samples=False):
         
         patcher = model
         model = model.model
@@ -1358,10 +1359,12 @@ class WanVideoSampler:
         steps = len(timesteps)
 
         if denoise_strength < 1.0:
+            if start_step != 0:
+                raise ValueError("start_step must be 0 when denoise_strength is used")
             start_step = steps - int(steps * denoise_strength) - 1
+            add_noise_to_samples = True #for now to not break old workflows
 
         first_sampler = (end_step != -1 or end_step >= steps)
-        add_noise_to_samples = True if first_sampler else False
 
         if isinstance(cfg, list):
             if steps != len(cfg):
