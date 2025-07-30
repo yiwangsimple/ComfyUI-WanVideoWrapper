@@ -661,14 +661,12 @@ class WanVideoSetLoRAs:
         
         patcher = model.clone()
         
-        lora_low_mem_load = merge_loras = False
+        merge_loras = False
         for l in lora:
-            lora_low_mem_load = l.get("low_mem_load", False)
             merge_loras = l.get("merge_loras", True)
-        if lora_low_mem_load is True or merge_loras is True:
-            raise ValueError("Set LoRA node does not use low_mem_load and can't merge LoRAs, disable low_mem_load when and merge_loras in the LoRA select node.")
+        if merge_loras is True:
+            raise ValueError("Set LoRA node does not use low_mem_load and can't merge LoRAs, disable 'merge_loras' in the LoRA select node.")
 
-        
         for l in lora:
             log.info(f"Loading LoRA: {l['name']} with strength: {l['strength']}")
             lora_path = l["path"]
@@ -1241,7 +1239,7 @@ class WanVideoModelLoader:
 
         for model in mm.current_loaded_models:
             if model._model() == patcher:
-                mm.current_loaded_models.remove(model)            
+                mm.current_loaded_models.remove(model)
 
         return (patcher,)
     
