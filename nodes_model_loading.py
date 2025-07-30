@@ -1049,6 +1049,8 @@ class WanVideoModelLoader:
                     dtype_to_use = dtype if sd[name].dtype == dtype else dtype_to_use
                     if "patch_embedding" in name:
                         dtype_to_use = torch.float32
+                    if "modulation" in name or "norm" in name or "bias" in name:
+                        dtype_to_use = base_dtype
                     set_module_tensor_to_device(transformer, name, device=transformer_load_device, dtype=dtype_to_use, value=sd[name])
                     pbar.update(1)
 
