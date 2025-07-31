@@ -1,10 +1,7 @@
 # Copyright 2024-2025 The Alibaba Wan Team Authors. All rights reserved.
 import math
-
 import torch
 import torch.nn as nn
-from diffusers.configuration_utils import ConfigMixin, register_to_config
-from diffusers.models.modeling_utils import ModelMixin
 from einops import repeat, rearrange
 from ...enhance_a_video.enhance import get_feta_scores
 
@@ -1096,7 +1093,7 @@ class WanModel(torch.nn.Module):
         self.slg_start_percent = 0.0
         self.slg_end_percent = 1.0
 
-        self.use_non_blocking = True
+        self.use_non_blocking = False
 
         self.video_attention_split_steps = []
 

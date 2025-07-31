@@ -365,14 +365,14 @@ class WanVideoDiffusionForcingSampler:
             block_swap_args = transformer_options.get("block_swap_args", None)
 
         if block_swap_args is not None:
-            transformer.use_non_blocking = block_swap_args.get("use_non_blocking", True)
+            transformer.use_non_blocking = block_swap_args.get("use_non_blocking", False)
             for name, param in transformer.named_parameters():
                 if "block" not in name:
                     param.data = param.data.to(device)
                 elif block_swap_args["offload_txt_emb"] and "txt_emb" in name:
-                    param.data = param.data.to(offload_device, non_blocking=transformer.use_non_blocking)
+                    param.data = param.data.to(offload_device)
                 elif block_swap_args["offload_img_emb"] and "img_emb" in name:
-                    param.data = param.data.to(offload_device, non_blocking=transformer.use_non_blocking)
+                    param.data = param.data.to(offload_device)
 
             transformer.block_swap(
                 block_swap_args["blocks_to_swap"] - 1 ,

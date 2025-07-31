@@ -109,5 +109,4 @@ def get_scheduler(scheduler, steps, shift, device, transformer_dim, flowedit_arg
         sample_scheduler.set_timesteps(steps, denoising_strength=denoise_strength, sigmas=sigmas[:-1].tolist() if sigmas is not None else None)
     if timesteps is None:
         timesteps = sample_scheduler.timesteps
-        log.info(f"timesteps: {timesteps}")
     return sample_scheduler, timesteps
