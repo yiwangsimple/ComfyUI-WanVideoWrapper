@@ -2496,7 +2496,7 @@ class WanVideoSampler:
                         
                         # Use the appropriate prompt for this section
                         if len(text_embeds["prompt_embeds"]) > 1:
-                            positive = text_embeds["prompt_embeds"][prompt_index]
+                            positive = [text_embeds["prompt_embeds"][prompt_index]]
                         else:
                             positive = text_embeds["prompt_embeds"]
 
