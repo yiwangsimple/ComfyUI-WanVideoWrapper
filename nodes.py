@@ -1298,8 +1298,8 @@ class WanVideoSampler:
             }
         }
 
-    RETURN_TYPES = ("LATENT", )
-    RETURN_NAMES = ("samples",)
+    RETURN_TYPES = ("LATENT", "LATENT",)
+    RETURN_NAMES = ("samples", "denoised_samples",)
     FUNCTION = "process"
     CATEGORY = "WanVideoWrapper"
 
@@ -2873,7 +2873,6 @@ class WanVideoSampler:
                         callback(idx, callback_latent, None, len(timesteps))
                     else:
                         pbar.update(1)
-                    del latent_model_input, timestep
                 else:
                     if callback is not None:
                         callback_latent = (zt_tgt.to(device) - vt_tgt.to(device) * t.to(device) / 1000).detach().permute(1,0,2,3)
@@ -2908,7 +2907,9 @@ class WanVideoSampler:
             "has_ref": has_ref, 
             "drop_last": drop_last,
             "generator_state": seed_g.get_state(),
-        },)
+        },{
+            "samples": (latent_model_input.cpu() - noise_pred.cpu() * t.cpu() / 1000).unsqueeze(0), 
+        })
 
 #region VideoDecode
 class WanVideoDecode:
