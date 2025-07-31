@@ -2482,6 +2482,12 @@ class WanVideoSampler:
                     context_pbar = ProgressBar(steps)
                     step_start_progress = idx
 
+                    # Validate all context windows before processing
+                    max_idx = latent_model_input.shape[1] if latent_model_input.ndim > 1 else 0
+                    for window_indices in context_queue:
+                        if not all(0 <= idx < max_idx for idx in window_indices):
+                            raise ValueError(f"Invalid context window indices {window_indices} for latent_model_input with shape {latent_model_input.shape}")
+
                     for i, c in enumerate(context_queue):
                         window_id = self.window_tracker.get_window_id(c)
                         
