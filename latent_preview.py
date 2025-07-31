@@ -79,7 +79,7 @@ def get_previewer(device, latent_format):
             method = LatentPreviewMethod.Latent2RGB
 
         if method == LatentPreviewMethod.TAESD:
-            taehv_path = os.path.join(folder_paths.models_dir, "vae_approx", "taew2_1.safetensors")
+            taehv_path = folder_paths.get_full_path("vae_approx", "taew2_1.safetensors")
             if not os.path.exists(taehv_path):
                 raise RuntimeError(f"Could not find {taehv_path}")
             taew_sd = comfy.utils.load_torch_file(taehv_path)
