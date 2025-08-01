@@ -12,7 +12,9 @@ from .fp8_optimization import convert_linear_with_lora_and_scale, remove_lora_fr
 from .wanvideo.schedulers import get_scheduler, get_sampling_sigmas, retrieve_timesteps, scheduler_list
 from .gguf.gguf import set_lora_params
 from .multitalk.multitalk import timestep_transform, add_noise
-from .utils import log, print_memory, apply_lora, clip_encode_image_tiled, fourier_filter, is_image_black, add_noise_to_reference_video, optimized_scale, setup_radial_attention, compile_model, dict_to_device, tangential_projection
+from .utils import(log, print_memory, apply_lora, clip_encode_image_tiled, fourier_filter, 
+                   is_image_black, add_noise_to_reference_video, optimized_scale, setup_radial_attention, 
+                   compile_model, dict_to_device, tangential_projection, set_module_tensor_to_device)
 from .cache_methods.cache_methods import cache_report
 from .enhance_a_video.globals import set_enhance_weight, set_num_frames
 from .taehv import TAEHV
@@ -23,6 +25,7 @@ from comfy import model_management as mm
 from comfy.utils import ProgressBar, common_upscale
 from comfy.clip_vision import clip_preprocess, ClipVisionModel
 from comfy.cli_args import args, LatentPreviewMethod
+import folder_paths
 
 script_directory = os.path.dirname(os.path.abspath(__file__))
 
@@ -157,6 +160,94 @@ class WanVideoBlockList:
                         raise ValueError(f"Invalid integer: '{part}'")
         return (block_list,)
 
+
+cache_dir = os.path.join(script_directory, 'text_embed_cache')
+
+def get_cache_path(prompt):
+    cache_key = prompt.strip()
+    cache_hash = hashlib.sha256(cache_key.encode('utf-8')).hexdigest()
+    return os.path.join(cache_dir, f"{cache_hash}.pt")
+
+def get_cached_text_embeds(positive_prompt, negative_prompt):
+    
+    os.makedirs(cache_dir, exist_ok=True)
+
+    context = None
+    context_null = None
+
+    pos_cache_path = get_cache_path(positive_prompt)
+    neg_cache_path = get_cache_path(negative_prompt)
+
+    # Try to load positive prompt embeds
+    if os.path.exists(pos_cache_path):
+        try:
+            log.info(f"Loading prompt embeds from cache: {pos_cache_path}")
+            context = torch.load(pos_cache_path)
+        except Exception as e:
+            log.warning(f"Failed to load cache: {e}, will re-encode.")
+
+    # Try to load negative prompt embeds
+    if os.path.exists(neg_cache_path):
+        try:
+            log.info(f"Loading prompt embeds from cache: {neg_cache_path}")
+            context_null = torch.load(neg_cache_path)
+        except Exception as e:
+            log.warning(f"Failed to load cache: {e}, will re-encode.")
+
+    return context, context_null
+
+class WanVideoTextEncodeCached:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {
+            "model_name": (folder_paths.get_filename_list("text_encoders"), {"tooltip": "These models are loaded from 'ComfyUI/models/text_encoders'"}),
+            "precision": (["fp32", "bf16"],
+                    {"default": "bf16"}
+                ),
+            "positive_prompt": ("STRING", {"default": "", "multiline": True} ),
+            "negative_prompt": ("STRING", {"default": "", "multiline": True} ),
+            "quantization": (['disabled', 'fp8_e4m3fn'], {"default": 'disabled', "tooltip": "optional quantization method"}),
+            "use_disk_cache": ("BOOLEAN", {"default": True, "tooltip": "Cache the text embeddings to disk for faster re-use, under the custom_nodes/ComfyUI-WanVideoWrapper/text_embed_cache directory"}),
+            "device": (["gpu", "cpu"], {"default": "gpu", "tooltip": "Device to run the text encoding on."}),
+            },
+        }
+
+    RETURN_TYPES = ("WANVIDEOTEXTEMBEDS", )
+    RETURN_NAMES = ("text_embeds",)
+    FUNCTION = "process"
+    CATEGORY = "WanVideoWrapper"
+    DESCRIPTION = "Encodes text prompts into text embeddings. This node loads and completely unloads the T5 after done, leaving no VRAM or RAM imprint. If prompts have been cached before T5 is not loaded at all."
+
+    def process(self, model_name, precision, positive_prompt, negative_prompt, quantization='disabled', use_disk_cache=True, device="gpu"):
+        from .nodes_model_loading import LoadWanVideoT5TextEncoder
+
+        echoshot = True if "[1]" in positive_prompt else False
+
+        if use_disk_cache:
+            context, context_null = get_cached_text_embeds(positive_prompt, negative_prompt)
+            if context is not None and context_null is not None:
+                return{
+                    "prompt_embeds": context,
+                    "negative_prompt_embeds": context_null,
+                    "echoshot": echoshot,
+                },
+            
+        t5, = LoadWanVideoT5TextEncoder().loadmodel(model_name, precision, "main_device", quantization)
+
+        prompt_embeds_dict, = WanVideoTextEncode().process(
+            positive_prompt=positive_prompt,
+            negative_prompt=negative_prompt,
+            t5=t5,
+            force_offload=False,
+            model_to_offload=None,
+            use_disk_cache=use_disk_cache,
+            device=device
+        )
+        del t5
+        mm.soft_empty_cache()
+        gc.collect()
+        return (prompt_embeds_dict,)
+                  
 #region TextEncode
 class WanVideoTextEncode:
     @classmethod
@@ -185,47 +276,17 @@ class WanVideoTextEncode:
         if t5 is None and not use_disk_cache:
             raise ValueError("T5 encoder is required for text encoding. Please provide a valid T5 encoder or enable disk cache.")
 
-        # Prepare cache directory if needed
+        echoshot = True if "[1]" in positive_prompt else False
+
         if use_disk_cache:
-            cache_dir = os.path.join(script_directory, 'text_embed_cache')
-            os.makedirs(cache_dir, exist_ok=True)
-
-            # Use unified cache key for any prompt
-            def get_cache_path(prompt):
-                cache_key = prompt.strip()
-                cache_hash = hashlib.sha256(cache_key.encode('utf-8')).hexdigest()
-                return os.path.join(cache_dir, f"{cache_hash}.pt")
-
-            context = None
-            context_null = None
-
-            pos_cache_path = get_cache_path(positive_prompt)
-            neg_cache_path = get_cache_path(negative_prompt)
-
-            # Try to load positive prompt embeds
-            if os.path.exists(pos_cache_path):
-                try:
-                    log.info(f"Loading prompt embeds from cache: {pos_cache_path}")
-                    context = torch.load(pos_cache_path)
-                except Exception as e:
-                    log.warning(f"Failed to load cache: {e}, will re-encode.")
-
-            # Try to load negative prompt embeds
-            if os.path.exists(neg_cache_path):
-                try:
-                    log.info(f"Loading prompt embeds from cache: {neg_cache_path}")
-                    context_null = torch.load(neg_cache_path)
-                except Exception as e:
-                    log.warning(f"Failed to load cache: {e}, will re-encode.")
-
-            # If both loaded, return combined
+            context, context_null = get_cached_text_embeds(positive_prompt, negative_prompt)
             if context is not None and context_null is not None:
-                prompt_embeds_dict = {
+                return{
                     "prompt_embeds": context,
                     "negative_prompt_embeds": context_null,
-                }
-                return (prompt_embeds_dict,)
-
+                    "echoshot": echoshot,
+                },
+            
         if t5 is None:
             raise ValueError("No cached text embeds found for prompts, please provide a T5 encoder.")
 
@@ -235,8 +296,7 @@ class WanVideoTextEncode:
 
         encoder = t5["model"]
         dtype = t5["dtype"]
-        echoshot = False
-
+        
         positive_prompts = []
         all_weights = []
 
@@ -250,7 +310,6 @@ class WanVideoTextEncode:
             segments = re.split(r'\[\d+\]', positive_prompt)
             positive_prompts_raw = [segment.strip() for segment in segments if segment.strip()]
             assert len(positive_prompts_raw) > 1 and len(positive_prompts_raw) < 7, 'Input shot num must between 2~6 !'
-            echoshot = True
         else:
             positive_prompts_raw = [positive_prompt.strip()]
             
@@ -262,17 +321,20 @@ class WanVideoTextEncode:
         mm.soft_empty_cache()
 
         if device == "gpu":
-            device = mm.get_torch_device()
-            encoder.model.to(device)
-        elif device == "cpu":
-            encoder.model.to(torch.device("cpu"))
+            device_to = mm.get_torch_device()
+        else:
+            device_to = torch.device("cpu")
+        params_to_keep = {'norm', 'pos_embedding', 'token_embedding'}
+        for name, param in encoder.model.named_parameters():
+            dtype_to_use = dtype if any(keyword in name for keyword in params_to_keep) else encoder.dtype
+            set_module_tensor_to_device(encoder.model, name, device=device_to, dtype=dtype_to_use, value=encoder.state_dict[name])
 
-        with torch.autocast(device_type=mm.get_autocast_device(device), dtype=dtype, enabled=True):
+        with torch.autocast(device_type=mm.get_autocast_device(device_to), dtype=dtype, enabled=encoder.quantization != 'disabled'):
             # Encode positive if not loaded from cache
             if use_disk_cache and context is not None:
                 pass
             else:
-                context = encoder(positive_prompts, device)
+                context = encoder(positive_prompts, device_to)
                 # Apply weights to embeddings if any were extracted
                 for i, weights in enumerate(all_weights):
                     for text, weight in weights.items():
@@ -284,7 +346,7 @@ class WanVideoTextEncode:
             if use_disk_cache and context_null is not None:
                 pass
             else:
-                context_null = encoder([negative_prompt], device)
+                context_null = encoder([negative_prompt], device_to)
 
         if force_offload:
             encoder.model.to(offload_device)
@@ -298,6 +360,8 @@ class WanVideoTextEncode:
 
         # Save each part to its own cache file if needed
         if use_disk_cache:
+            pos_cache_path = get_cache_path(positive_prompt)
+            neg_cache_path = get_cache_path(negative_prompt)
             try:
                 if not os.path.exists(pos_cache_path):
                     torch.save(context, pos_cache_path)
@@ -3151,6 +3215,7 @@ NODE_CLASS_MAPPINGS = {
     "WanVideoFreeInitArgs": WanVideoFreeInitArgs,
     "WanVideoSetRadialAttention": WanVideoSetRadialAttention,
     "WanVideoBlockList": WanVideoBlockList,
+    "WanVideoTextEncodeCached": WanVideoTextEncodeCached,
     }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "WanVideoSampler": "WanVideo Sampler",
@@ -3179,4 +3244,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "WanVideoFreeInitArgs": "WanVideo Free Init Args",
     "WanVideoSetRadialAttention": "WanVideo Set Radial Attention",
     "WanVideoBlockList": "WanVideo Block List",
+    "WanVideoTextEncodeCached": "WanVideo TextEncode Cached",
     }
