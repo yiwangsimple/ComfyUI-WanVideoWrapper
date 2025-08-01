@@ -421,6 +421,7 @@ class WanVideoTextEncodeSingle:
     def process(self, prompt, t5=None, force_offload=True, model_to_offload=None, use_disk_cache=False, device="gpu"):
         # Unified cache logic: use a single cache file per unique prompt
         encoded = None
+        echoshot = True if "[1]" in prompt else False
         if use_disk_cache:
             cache_dir = os.path.join(script_directory, 'text_embed_cache')
             os.makedirs(cache_dir, exist_ok=True)
@@ -449,15 +450,16 @@ class WanVideoTextEncodeSingle:
             dtype = t5["dtype"]
 
             if device == "gpu":
-                device = mm.get_torch_device()
-                encoder.model.to(device)
-            elif device == "cpu":
-                encoder.model.to(torch.device("cpu"))
+                device_to = mm.get_torch_device()
+            else:
+                device_to = torch.device("cpu")
+            params_to_keep = {'norm', 'pos_embedding', 'token_embedding'}
+            for name, param in encoder.model.named_parameters():
+                dtype_to_use = dtype if any(keyword in name for keyword in params_to_keep) else encoder.dtype
+                set_module_tensor_to_device(encoder.model, name, device=device_to, dtype=dtype_to_use, value=encoder.state_dict[name])
 
-            encoder.model.to(device)
-           
-            with torch.autocast(device_type=mm.get_autocast_device(device), dtype=dtype, enabled=True):
-                encoded = encoder([prompt], device)
+            with torch.autocast(device_type=mm.get_autocast_device(device_to), dtype=dtype, enabled=encoder.quantization != 'disabled'):
+                encoded = encoder([prompt], device_to)
 
             if force_offload:
                 encoder.model.to(offload_device)
@@ -475,6 +477,7 @@ class WanVideoTextEncodeSingle:
         prompt_embeds_dict = {
             "prompt_embeds": encoded,
             "negative_prompt_embeds": None,
+            "echoshot": echoshot
         }
         return (prompt_embeds_dict,)
     
@@ -2158,8 +2161,11 @@ class WanVideoSampler:
 
                 batch_size = 1
 
-                if not math.isclose(cfg_scale, 1.0) and len(positive_embeds) > 1:
-                    negative_embeds = negative_embeds * len(positive_embeds)
+                if not math.isclose(cfg_scale, 1.0):
+                    if negative_embeds is None:
+                        raise ValueError("Negative embeddings must be provided for CFG scale > 1.0")
+                    if len(positive_embeds) > 1:
+                        negative_embeds = negative_embeds * len(positive_embeds)
 
                 if not batched_cfg:
                     #cond
