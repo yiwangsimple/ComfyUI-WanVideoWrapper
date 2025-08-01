@@ -35,6 +35,14 @@ offload_device = mm.unet_offload_device()
 VAE_STRIDE = (4, 8, 8)
 PATCH_SIZE = (1, 2, 2)
 
+def offload_transformer(transformer):
+    transformer.teacache_state.clear_all()
+    transformer.magcache_state.clear_all()
+    transformer.easycache_state.clear_all()
+    transformer.to(offload_device)
+    mm.soft_empty_cache()
+    gc.collect()
+
 class WanVideoEnhanceAVideo:
     @classmethod
     def INPUT_TYPES(s):
@@ -2181,103 +2189,109 @@ class WanVideoSampler:
                     if len(positive_embeds) > 1:
                         negative_embeds = negative_embeds * len(positive_embeds)
 
-                if not batched_cfg:
-                    #cond
-                    noise_pred_cond, cache_state_cond = transformer(
-                        [z_pos], context=positive_embeds, y=[image_cond_input] if image_cond_input is not None else None,
-                        clip_fea=clip_fea, is_uncond=False, current_step_percentage=current_step_percentage,
-                        pred_id=cache_state[0] if cache_state else None,
-                        vace_data=vace_data, attn_cond=attn_cond,
-                        **base_params
-                    )
-                    noise_pred_cond = noise_pred_cond[0].to(intermediate_device)
-                    if math.isclose(cfg_scale, 1.0):
-                        if use_fresca:
-                            noise_pred_cond = fourier_filter(
-                                noise_pred_cond,
-                                scale_low=fresca_scale_low,
-                                scale_high=fresca_scale_high,
-                                freq_cutoff=fresca_freq_cutoff,
-                            )
-                        return noise_pred_cond, [cache_state_cond]
-                    #uncond
-                    if fantasytalking_embeds is not None:
-                        if not math.isclose(audio_cfg_scale[idx], 1.0):
-                            base_params['audio_proj'] = None
-                    noise_pred_uncond, cache_state_uncond = transformer(
-                        [z_neg], context=negative_embeds, clip_fea=clip_fea_neg if clip_fea_neg is not None else clip_fea,
-                        y=[image_cond_input] if image_cond_input is not None else None, 
-                        is_uncond=True, current_step_percentage=current_step_percentage,
-                        pred_id=cache_state[1] if cache_state else None,
-                        vace_data=vace_data, attn_cond=attn_cond_neg,
-                        **base_params
-                    )
-                    noise_pred_uncond = noise_pred_uncond[0].to(intermediate_device)
-                    #phantom
-                    if use_phantom and not math.isclose(phantom_cfg_scale[idx], 1.0):
-                        noise_pred_phantom, cache_state_phantom = transformer(
-                        [z_phantom_img], context=negative_embeds, clip_fea=clip_fea_neg if clip_fea_neg is not None else clip_fea,
-                        y=[image_cond_input] if image_cond_input is not None else None, 
-                        is_uncond=True, current_step_percentage=current_step_percentage,
-                        pred_id=cache_state[2] if cache_state else None,
-                        vace_data=None,
-                        **base_params
-                    )
-                        noise_pred_phantom = noise_pred_phantom[0].to(intermediate_device)
-                        
-                        noise_pred = noise_pred_uncond + phantom_cfg_scale[idx] * (noise_pred_phantom - noise_pred_uncond) + cfg_scale * (noise_pred_cond - noise_pred_phantom)
-                        return noise_pred, [cache_state_cond, cache_state_uncond, cache_state_phantom]
-                    #fantasytalking
-                    if fantasytalking_embeds is not None:
-                        if not math.isclose(audio_cfg_scale[idx], 1.0):
-                            if cache_state is not None and len(cache_state) != 3:
-                                cache_state.append(None)
-                            base_params['audio_proj'] = None
-                            noise_pred_no_audio, cache_state_audio = transformer(
-                                [z_pos], context=positive_embeds, y=[image_cond_input] if image_cond_input is not None else None,
-                                clip_fea=clip_fea, is_uncond=False, current_step_percentage=current_step_percentage,
-                                pred_id=cache_state[2] if cache_state else None,
-                                vace_data=vace_data,
-                                **base_params
-                            )
-                            noise_pred_no_audio = noise_pred_no_audio[0].to(intermediate_device)
-                            noise_pred = (
-                                noise_pred_uncond
-                                + cfg_scale * (noise_pred_no_audio - noise_pred_uncond)
-                                + audio_cfg_scale[idx] * (noise_pred_cond - noise_pred_no_audio)
+                try:
+                    if not batched_cfg:
+                        #cond
+                        noise_pred_cond, cache_state_cond = transformer(
+                            [z_pos], context=positive_embeds, y=[image_cond_input] if image_cond_input is not None else None,
+                            clip_fea=clip_fea, is_uncond=False, current_step_percentage=current_step_percentage,
+                            pred_id=cache_state[0] if cache_state else None,
+                            vace_data=vace_data, attn_cond=attn_cond,
+                            **base_params
+                        )
+                        noise_pred_cond = noise_pred_cond[0].to(intermediate_device)
+                        if math.isclose(cfg_scale, 1.0):
+                            if use_fresca:
+                                noise_pred_cond = fourier_filter(
+                                    noise_pred_cond,
+                                    scale_low=fresca_scale_low,
+                                    scale_high=fresca_scale_high,
+                                    freq_cutoff=fresca_freq_cutoff,
                                 )
-                            return noise_pred, [cache_state_cond, cache_state_uncond, cache_state_audio]
-                    elif multitalk_audio_embedding is not None:
-                        if not math.isclose(audio_cfg_scale[idx], 1.0):
-                            if cache_state is not None and len(cache_state) != 3:
-                                cache_state.append(None)
-                            base_params['multitalk_audio'] = torch.zeros_like(multitalk_audio_input)[-1:]
-                            noise_pred_no_audio, cache_state_audio = transformer(
-                                [z_pos], context=negative_embeds, y=[image_cond_input] if image_cond_input is not None else None,
-                                clip_fea=clip_fea, is_uncond=False, current_step_percentage=current_step_percentage,
-                                pred_id=cache_state[2] if cache_state else None,
-                                vace_data=vace_data,
-                                **base_params
-                            )
-                            noise_pred_no_audio = noise_pred_no_audio[0].to(intermediate_device)
-                            noise_pred = (
-                                noise_pred_no_audio
-                                + cfg_scale * (noise_pred_cond - noise_pred_uncond)
-                                + audio_cfg_scale[idx] * (noise_pred_uncond - noise_pred_no_audio)
+                            return noise_pred_cond, [cache_state_cond]
+                        #uncond
+                        if fantasytalking_embeds is not None:
+                            if not math.isclose(audio_cfg_scale[idx], 1.0):
+                                base_params['audio_proj'] = None
+                        noise_pred_uncond, cache_state_uncond = transformer(
+                            [z_neg], context=negative_embeds, clip_fea=clip_fea_neg if clip_fea_neg is not None else clip_fea,
+                            y=[image_cond_input] if image_cond_input is not None else None, 
+                            is_uncond=True, current_step_percentage=current_step_percentage,
+                            pred_id=cache_state[1] if cache_state else None,
+                            vace_data=vace_data, attn_cond=attn_cond_neg,
+                            **base_params
+                        )
+                        noise_pred_uncond = noise_pred_uncond[0].to(intermediate_device)
+                        #phantom
+                        if use_phantom and not math.isclose(phantom_cfg_scale[idx], 1.0):
+                            noise_pred_phantom, cache_state_phantom = transformer(
+                            [z_phantom_img], context=negative_embeds, clip_fea=clip_fea_neg if clip_fea_neg is not None else clip_fea,
+                            y=[image_cond_input] if image_cond_input is not None else None, 
+                            is_uncond=True, current_step_percentage=current_step_percentage,
+                            pred_id=cache_state[2] if cache_state else None,
+                            vace_data=None,
+                            **base_params
+                        )
+                            noise_pred_phantom = noise_pred_phantom[0].to(intermediate_device)
+                            
+                            noise_pred = noise_pred_uncond + phantom_cfg_scale[idx] * (noise_pred_phantom - noise_pred_uncond) + cfg_scale * (noise_pred_cond - noise_pred_phantom)
+                            return noise_pred, [cache_state_cond, cache_state_uncond, cache_state_phantom]
+                        #fantasytalking
+                        if fantasytalking_embeds is not None:
+                            if not math.isclose(audio_cfg_scale[idx], 1.0):
+                                if cache_state is not None and len(cache_state) != 3:
+                                    cache_state.append(None)
+                                base_params['audio_proj'] = None
+                                noise_pred_no_audio, cache_state_audio = transformer(
+                                    [z_pos], context=positive_embeds, y=[image_cond_input] if image_cond_input is not None else None,
+                                    clip_fea=clip_fea, is_uncond=False, current_step_percentage=current_step_percentage,
+                                    pred_id=cache_state[2] if cache_state else None,
+                                    vace_data=vace_data,
+                                    **base_params
                                 )
-                            return noise_pred, [cache_state_cond, cache_state_uncond, cache_state_audio]
+                                noise_pred_no_audio = noise_pred_no_audio[0].to(intermediate_device)
+                                noise_pred = (
+                                    noise_pred_uncond
+                                    + cfg_scale * (noise_pred_no_audio - noise_pred_uncond)
+                                    + audio_cfg_scale[idx] * (noise_pred_cond - noise_pred_no_audio)
+                                    )
+                                return noise_pred, [cache_state_cond, cache_state_uncond, cache_state_audio]
+                        elif multitalk_audio_embedding is not None:
+                            if not math.isclose(audio_cfg_scale[idx], 1.0):
+                                if cache_state is not None and len(cache_state) != 3:
+                                    cache_state.append(None)
+                                base_params['multitalk_audio'] = torch.zeros_like(multitalk_audio_input)[-1:]
+                                noise_pred_no_audio, cache_state_audio = transformer(
+                                    [z_pos], context=negative_embeds, y=[image_cond_input] if image_cond_input is not None else None,
+                                    clip_fea=clip_fea, is_uncond=False, current_step_percentage=current_step_percentage,
+                                    pred_id=cache_state[2] if cache_state else None,
+                                    vace_data=vace_data,
+                                    **base_params
+                                )
+                                noise_pred_no_audio = noise_pred_no_audio[0].to(intermediate_device)
+                                noise_pred = (
+                                    noise_pred_no_audio
+                                    + cfg_scale * (noise_pred_cond - noise_pred_uncond)
+                                    + audio_cfg_scale[idx] * (noise_pred_uncond - noise_pred_no_audio)
+                                    )
+                                return noise_pred, [cache_state_cond, cache_state_uncond, cache_state_audio]
 
-                #batched
-                else:
-                    cache_state_uncond = None
-                    [noise_pred_cond, noise_pred_uncond], cache_state_cond = transformer(
-                        [z] + [z], context=positive_embeds + negative_embeds, 
-                        y=[image_cond_input] + [image_cond_input] if image_cond_input is not None else None,
-                        clip_fea=clip_fea.repeat(2,1,1), is_uncond=False, current_step_percentage=current_step_percentage,
-                        pred_id=cache_state[0] if cache_state else None,
-                        **base_params
-                    )
-                #cfg
+                    #batched
+                    else:
+                        cache_state_uncond = None
+                        [noise_pred_cond, noise_pred_uncond], cache_state_cond = transformer(
+                            [z] + [z], context=positive_embeds + negative_embeds, 
+                            y=[image_cond_input] + [image_cond_input] if image_cond_input is not None else None,
+                            clip_fea=clip_fea.repeat(2,1,1), is_uncond=False, current_step_percentage=current_step_percentage,
+                            pred_id=cache_state[0] if cache_state else None,
+                            **base_params
+                        )
+                except Exception as e:
+                    log.error(f"Error during model prediction: {e}")
+                    if force_offload:
+                        if model["manual_offloading"]:
+                            offload_transformer(transformer)
+                    raise mm.InterruptProcessingException()
 
                 #https://github.com/WeichenFan/CFG-Zero-star/
                 if use_cfg_zero_star:
@@ -2412,6 +2426,8 @@ class WanVideoSampler:
 
                 latent_model_input = latent.to(device)
 
+                current_step_percentage = idx / len(timesteps)
+
                 timestep = torch.tensor([t]).to(device)
                 if scheduler == "flowmatch_pusa" or (is_5b and latents_to_insert is not None):
                     timestep = timestep.unsqueeze(1).repeat(1, latent_video_length)
@@ -2421,9 +2437,7 @@ class WanVideoSampler:
                             non_noise_indices = [i for i in range(timestep.shape[1]) if i not in empty_latent_indices]
                             timestep[:, non_noise_indices] = 0
                         else:
-                            timestep[:,0:num_latents_to_insert] = 0
-                    #print(f"timestep: {timestep}")
-                current_step_percentage = idx / len(timesteps)
+                            timestep[:,0:num_latents_to_insert] = 0                
 
                 ### latent shift
                 if latent_shift_loop:
@@ -2657,11 +2671,16 @@ class WanVideoSampler:
                         if add_cond is not None:
                             partial_add_cond = add_cond[:, :, c].to(device, dtype)
 
+                        if len(timestep.shape) != 1:
+                            partial_timestep = timestep[:, c]
+                        else:
+                            partial_timestep = timestep
+
                         noise_pred_context, new_teacache = predict_with_cfg(
                             partial_latent_model_input, 
                             cfg[idx], positive, 
                             text_embeds["negative_prompt_embeds"], 
-                            timestep, idx, partial_img_emb, clip_fea, partial_control_latents, partial_vace_context, partial_unianim_data,partial_audio_proj,
+                            partial_timestep, idx, partial_img_emb, clip_fea, partial_control_latents, partial_vace_context, partial_unianim_data,partial_audio_proj,
                             partial_control_camera_latents, partial_add_cond, current_teacache, context_window=c)
 
                         if cache_args is not None:
@@ -2987,9 +3006,7 @@ class WanVideoSampler:
 
         if force_offload:
             if model["manual_offloading"]:
-                transformer.to(offload_device)
-                mm.soft_empty_cache()
-                gc.collect()
+                offload_transformer(transformer)
 
         try:
             print_memory(device)
