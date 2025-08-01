@@ -1387,6 +1387,13 @@ class LoadWanVideoT5TextEncoder:
 
         model_path = folder_paths.get_full_path("text_encoders", model_name)
         sd = load_torch_file(model_path, safe_load=True)
+
+        if quantization == "disabled":
+            for k, v in sd.items():
+                if isinstance(v, torch.Tensor):
+                    if v.dtype == torch.float8_e4m3fn:
+                        quantization = "fp8_e4m3fn"
+                        break
         
         if "token_embedding.weight" not in sd and "shared.weight" not in sd:
             raise ValueError("Invalid T5 text encoder model, this node expects the 'umt5-xxl' model")
