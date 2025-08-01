@@ -2654,6 +2654,8 @@ class WanVideoSampler:
                             partial_audio_proj = audio_proj[:, c]
 
                         partial_latent_model_input = latent_model_input[:, c]
+                        if latents_to_insert is not None and c[0] != 0:
+                            partial_latent_model_input[:, 0:num_latents_to_insert] = latents_to_insert
 
                         partial_unianim_data = None
                         if unianim_data is not None:
@@ -2673,8 +2675,10 @@ class WanVideoSampler:
 
                         if len(timestep.shape) != 1:
                             partial_timestep = timestep[:, c]
+                            partial_timestep[:, :num_latents_to_insert] = 0
                         else:
                             partial_timestep = timestep
+                        #print("Partial timestep:", partial_timestep)
 
                         noise_pred_context, new_teacache = predict_with_cfg(
                             partial_latent_model_input, 
