@@ -232,7 +232,7 @@ negative output is meant to be used with NAG, it contains only negative prompt e
                     "prompt_embeds": context,
                     "negative_prompt_embeds": context_null,
                     "echoshot": echoshot,
-                },
+                },{"prompt_embeds": context_null}
             
         t5, = LoadWanVideoT5TextEncoder().loadmodel(model_name, precision, "main_device", quantization)
 
@@ -247,11 +247,8 @@ negative output is meant to be used with NAG, it contains only negative prompt e
         )
         del t5
         mm.soft_empty_cache()
-        gc.collect()
-        negative_only_dict = {
-            "prompt_embeds": prompt_embeds_dict["negative_prompt_embeds"],
-        }
-        return (prompt_embeds_dict, negative_only_dict)
+        gc.collect() 
+        return (prompt_embeds_dict, {"prompt_embeds": prompt_embeds_dict["negative_prompt_embeds"]})
 
 #region TextEncode
 class WanVideoTextEncode:
