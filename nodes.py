@@ -212,11 +212,13 @@ class WanVideoTextEncodeCached:
             },
         }
 
-    RETURN_TYPES = ("WANVIDEOTEXTEMBEDS", )
-    RETURN_NAMES = ("text_embeds",)
+    RETURN_TYPES = ("WANVIDEOTEXTEMBEDS", "WANVIDEOTEXTEMBEDS",)
+    RETURN_NAMES = ("text_embeds", "negative_text_embeds")
     FUNCTION = "process"
     CATEGORY = "WanVideoWrapper"
-    DESCRIPTION = "Encodes text prompts into text embeddings. This node loads and completely unloads the T5 after done, leaving no VRAM or RAM imprint. If prompts have been cached before T5 is not loaded at all."
+    DESCRIPTION = """Encodes text prompts into text embeddings. This node loads and completely unloads the T5 after done,  
+leaving no VRAM or RAM imprint. If prompts have been cached before T5 is not loaded at all.  
+negative output is meant to be used with NAG, it contains only negative prompt embeddings.  """
 
     def process(self, model_name, precision, positive_prompt, negative_prompt, quantization='disabled', use_disk_cache=True, device="gpu"):
         from .nodes_model_loading import LoadWanVideoT5TextEncoder
@@ -246,8 +248,11 @@ class WanVideoTextEncodeCached:
         del t5
         mm.soft_empty_cache()
         gc.collect()
-        return (prompt_embeds_dict,)
-                  
+        negative_only_dict = {
+            "prompt_embeds": prompt_embeds_dict["negative_prompt_embeds"],
+        }
+        return (prompt_embeds_dict, negative_only_dict)
+
 #region TextEncode
 class WanVideoTextEncode:
     @classmethod
