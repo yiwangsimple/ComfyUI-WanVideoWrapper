@@ -1111,7 +1111,6 @@ class WanVideoModelLoader:
                     
                     transformer.patch_embedding = new_in
                     transformer.expanded_patch_embedding = new_in
-                    transformer.register_to_config(in_dim=new_in_dim)
 
                 patcher, _ = load_lora_for_models(patcher, None, lora_sd, lora_strength, 0)
                 
