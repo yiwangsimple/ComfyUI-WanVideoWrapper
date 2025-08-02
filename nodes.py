@@ -241,7 +241,7 @@ of the original Wan templates or a custom system prompt.
 """
 
 
-    def process(self, model_name, precision, positive_prompt, negative_prompt, quantization='disabled', use_disk_cache=True, device="gpu", prompt_extender_args=None):
+    def process(self, model_name, precision, positive_prompt, negative_prompt, quantization='disabled', use_disk_cache=True, device="gpu", extender_args=None):
         from .nodes_model_loading import LoadWanVideoT5TextEncoder
         pbar = ProgressBar(3)
 
@@ -249,8 +249,8 @@ of the original Wan templates or a custom system prompt.
 
         # Handle prompt extension with in-memory cache
         orig_prompt = positive_prompt
-        if prompt_extender_args is not None:
-            extender_key = (orig_prompt, str(prompt_extender_args))
+        if extender_args is not None:
+            extender_key = (orig_prompt, str(extender_args))
             if extender_key in _extender_cache:
                 positive_prompt = _extender_cache[extender_key]
                 log.info(f"Loaded extended prompt from in-memory cache: {positive_prompt}")
@@ -258,16 +258,16 @@ of the original Wan templates or a custom system prompt.
                 from .qwen.qwen import QwenLoader, WanVideoPromptExtender
                 log.info("Using WanVideoPromptExtender to process prompts")
                 qwen, = QwenLoader().load(
-                    prompt_extender_args["model"], 
+                    extender_args["model"], 
                     load_device="main_device" if device == "gpu" else "cpu", 
                     precision=precision)
                 positive_prompt, = WanVideoPromptExtender().generate(
                     qwen=qwen,
-                    max_new_tokens=prompt_extender_args["max_new_tokens"],
+                    max_new_tokens=extender_args["max_new_tokens"],
                     prompt=orig_prompt,
                     device=device,
                     force_offload=False,
-                    custom_system_prompt=prompt_extender_args["system_prompt"],
+                    custom_system_prompt=extender_args["system_prompt"],
                 )
                 log.info(f"Extended positive prompt: {positive_prompt}")
                 _extender_cache[extender_key] = positive_prompt
