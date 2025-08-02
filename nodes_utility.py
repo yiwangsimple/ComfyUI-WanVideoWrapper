@@ -233,6 +233,7 @@ class DummyComfyWanModelObject:
     @classmethod
     def INPUT_TYPES(s):
         return {"required": {
+            "shift": ("FLOAT", {"default": 1.0, "min": -100.0, "max": 100.0, "step": 0.01, "tooltip": "Sigma shift value"}),
             }
         }
 
@@ -242,12 +243,14 @@ class DummyComfyWanModelObject:
     CATEGORY = "WanVideoWrapper"
     DESCRIPTION = "Helper node to create empty Wan model to use with BasicScheduler -node to get sigmas"
 
-    def create(self):
+    def create(self, shift):
         from comfy.model_sampling import ModelSamplingDiscreteFlow
         class DummyModel:
             def get_model_object(self, name):
                 if name == "model_sampling":
-                    return ModelSamplingDiscreteFlow()
+                    model_sampling = ModelSamplingDiscreteFlow()
+                    model_sampling.set_parameters(shift=shift)
+                    return model_sampling
                 return None
         return (DummyModel(),)
     
