@@ -169,6 +169,10 @@ class WanVideoBlockList:
         return (block_list,)
 
 
+
+# In-memory cache for prompt extender output
+_extender_cache = {}
+
 cache_dir = os.path.join(script_directory, 'text_embed_cache')
 
 def get_cache_path(prompt):
@@ -218,21 +222,59 @@ class WanVideoTextEncodeCached:
             "use_disk_cache": ("BOOLEAN", {"default": True, "tooltip": "Cache the text embeddings to disk for faster re-use, under the custom_nodes/ComfyUI-WanVideoWrapper/text_embed_cache directory"}),
             "device": (["gpu", "cpu"], {"default": "gpu", "tooltip": "Device to run the text encoding on."}),
             },
+            "optional": {
+                "extender_args": ("WANVIDEOPROMPTEXTENDER_ARGS", {"tooltip": "Use this node to extend the prompt with additional text."}),
+            }
         }
 
-    RETURN_TYPES = ("WANVIDEOTEXTEMBEDS", "WANVIDEOTEXTEMBEDS",)
-    RETURN_NAMES = ("text_embeds", "negative_text_embeds")
+    RETURN_TYPES = ("WANVIDEOTEXTEMBEDS", "WANVIDEOTEXTEMBEDS", "STRING")
+    RETURN_NAMES = ("text_embeds", "negative_text_embeds", "positive_prompt")
+    OUTPUT_TOOLTIPS = ("The text embeddings for both prompts", "The text embeddings for the negative prompt only (for NAG)", "Positive prompt to display prompt extender results")
     FUNCTION = "process"
     CATEGORY = "WanVideoWrapper"
     DESCRIPTION = """Encodes text prompts into text embeddings. This node loads and completely unloads the T5 after done,  
 leaving no VRAM or RAM imprint. If prompts have been cached before T5 is not loaded at all.  
-negative output is meant to be used with NAG, it contains only negative prompt embeddings.  """
+negative output is meant to be used with NAG, it contains only negative prompt embeddings.  
 
-    def process(self, model_name, precision, positive_prompt, negative_prompt, quantization='disabled', use_disk_cache=True, device="gpu"):
+Additionally you can provide a Qwen LLM model to extend the positive prompt with either one  
+of the original Wan templates or a custom system prompt.  
+"""
+
+
+    def process(self, model_name, precision, positive_prompt, negative_prompt, quantization='disabled', use_disk_cache=True, device="gpu", prompt_extender_args=None):
         from .nodes_model_loading import LoadWanVideoT5TextEncoder
+        pbar = ProgressBar(3)
 
         echoshot = True if "[1]" in positive_prompt else False
 
+        # Handle prompt extension with in-memory cache
+        orig_prompt = positive_prompt
+        if prompt_extender_args is not None:
+            extender_key = (orig_prompt, str(prompt_extender_args))
+            if extender_key in _extender_cache:
+                positive_prompt = _extender_cache[extender_key]
+                log.info(f"Loaded extended prompt from in-memory cache: {positive_prompt}")
+            else:
+                from .qwen.qwen import QwenLoader, WanVideoPromptExtender
+                log.info("Using WanVideoPromptExtender to process prompts")
+                qwen, = QwenLoader().load(
+                    prompt_extender_args["model"], 
+                    load_device="main_device" if device == "gpu" else "cpu", 
+                    precision=precision)
+                positive_prompt, = WanVideoPromptExtender().generate(
+                    qwen=qwen,
+                    max_new_tokens=prompt_extender_args["max_new_tokens"],
+                    prompt=orig_prompt,
+                    device=device,
+                    force_offload=False,
+                    custom_system_prompt=prompt_extender_args["system_prompt"],
+                )
+                log.info(f"Extended positive prompt: {positive_prompt}")
+                _extender_cache[extender_key] = positive_prompt
+                del qwen
+            pbar.update(1)
+
+        # Now check disk cache using the (possibly extended) prompt
         if use_disk_cache:
             context, context_null = get_cached_text_embeds(positive_prompt, negative_prompt)
             if context is not None and context_null is not None:
@@ -240,9 +282,10 @@ negative output is meant to be used with NAG, it contains only negative prompt e
                     "prompt_embeds": context,
                     "negative_prompt_embeds": context_null,
                     "echoshot": echoshot,
-                },{"prompt_embeds": context_null}
-            
+                },{"prompt_embeds": context_null}, positive_prompt
+
         t5, = LoadWanVideoT5TextEncoder().loadmodel(model_name, precision, "main_device", quantization)
+        pbar.update(1)
 
         prompt_embeds_dict, = WanVideoTextEncode().process(
             positive_prompt=positive_prompt,
@@ -253,10 +296,11 @@ negative output is meant to be used with NAG, it contains only negative prompt e
             use_disk_cache=use_disk_cache,
             device=device
         )
+        pbar.update(1)
         del t5
         mm.soft_empty_cache()
         gc.collect() 
-        return (prompt_embeds_dict, {"prompt_embeds": prompt_embeds_dict["negative_prompt_embeds"]})
+        return (prompt_embeds_dict, {"prompt_embeds": prompt_embeds_dict["negative_prompt_embeds"]}, positive_prompt)
 
 #region TextEncode
 class WanVideoTextEncode:
