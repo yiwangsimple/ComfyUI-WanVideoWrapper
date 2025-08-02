@@ -1092,6 +1092,9 @@ class WanVideoModelLoader:
                 
                 if "diffusion_model.patch_embedding.lora_A.weight" in lora_sd:
                     log.info("Control-LoRA detected, patching model...")
+                    if not merge_loras:
+                        log.warning("Control-LoRA patching is only supported with merge_loras=True, setting it to True")
+                        merge_loras = True
                     control_lora = True
 
                     in_cls = transformer.patch_embedding.__class__ # nn.Conv3d
