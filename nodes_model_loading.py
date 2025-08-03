@@ -674,6 +674,8 @@ class WanVideoSetLoRAs:
             lora_path = l["path"]
             lora_strength = l["strength"]
             if isinstance(lora_strength, list):
+                if merge_loras:
+                    raise ValueError("LoRA strength should be a single value when merge_loras=True")
                 patcher.model_options['transformer_options']["lora_scheduling_enabled"] = True
             if lora_strength == 0:
                 log.warning(f"LoRA {lora_path} has strength 0, skipping...")
@@ -1078,6 +1080,8 @@ class WanVideoModelLoader:
                 lora_path = l["path"]
                 lora_strength = l["strength"]
                 if isinstance(lora_strength, list):
+                    if merge_loras:
+                        raise ValueError("LoRA strength should be a single value when merge_loras=True")
                     transformer.lora_scheduling_enabled = True
                 if lora_strength == 0:
                     log.warning(f"LoRA {lora_path} has strength 0, skipping...")
