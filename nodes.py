@@ -2341,7 +2341,7 @@ class WanVideoSampler:
                     if force_offload:
                         if model["manual_offloading"]:
                             offload_transformer(transformer)
-                    raise mm.InterruptProcessingException()
+                    raise e
 
                 #https://github.com/WeichenFan/CFG-Zero-star/
                 if use_cfg_zero_star:
