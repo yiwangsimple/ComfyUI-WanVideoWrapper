@@ -1978,6 +1978,10 @@ class WanVideoSampler:
                     module.offload()
                 if hasattr(module, "onload"):
                     module.onload()
+            for block in transformer.blocks:
+                block.modulation = torch.nn.Parameter(block.modulation.to(device))
+            transformer.head.modulation = torch.nn.Parameter(transformer.head.modulation.to(device))
+
         elif model["manual_offloading"]:
             transformer.to(device)
 
