@@ -30,8 +30,12 @@ def fp8_linear_forward(cls, original_dtype, input):
 
 
 @torch.compiler.disable()
-def apply_lora(weight, lora):
+def apply_lora(weight, lora, step=None):
     for lora_diff, lora_strength in zip(lora[0], lora[1]):
+        if isinstance(lora_strength, list):
+            lora_strength = lora_strength[step]
+            if lora_strength == 0.0:
+                return weight
         patch_diff = torch.mm(
             lora_diff[0].flatten(start_dim=1).to(weight.device),
             lora_diff[1].flatten(start_dim=1).to(weight.device)
@@ -57,7 +61,7 @@ def linear_with_lora_and_scale_forward(cls, input):
 
     lora = getattr(cls, "lora", None)
     if lora is not None:
-        weight = apply_lora(weight, lora).to(input.dtype)
+        weight = apply_lora(weight, lora, cls.step).to(input.dtype)
 
     return torch.nn.functional.linear(input, weight, bias)
  
@@ -110,6 +114,7 @@ def convert_linear_with_lora_and_scale(module, scale_weight_keys=None, patches=N
                     original_forward_ = submodule.forward
                     setattr(submodule, "original_forward_", original_forward_)
                     setattr(submodule, "forward", lambda input, m=submodule: linear_with_lora_and_scale_forward(m, input))
+                    setattr(submodule, "step", 0)  # Initialize step for LoRA if needed
 
 
 def remove_lora_from_module(module):

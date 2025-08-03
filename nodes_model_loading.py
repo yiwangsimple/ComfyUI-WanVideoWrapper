@@ -371,11 +371,12 @@ class WanVideoLoraSelect:
             low_mem_load = False  # Unmerged LoRAs don't need low_mem_load
         loras_list = []
 
-        strength = round(strength, 4)
-        if strength == 0.0:
-            if prev_lora is not None:
-                loras_list.extend(prev_lora)
-            return (loras_list,)
+        if not isinstance(strength, list):
+            strength = round(strength, 4)
+            if strength == 0.0:
+                if prev_lora is not None:
+                    loras_list.extend(prev_lora)
+                return (loras_list,)
 
         try:
             lora_path = folder_paths.get_full_path("loras", lora)
@@ -666,11 +667,14 @@ class WanVideoSetLoRAs:
             merge_loras = l.get("merge_loras", True)
         if merge_loras is True:
             raise ValueError("Set LoRA node does not use low_mem_load and can't merge LoRAs, disable 'merge_loras' in the LoRA select node.")
-
+        
+        patcher.model_options['transformer_options']["lora_scheduling_enabled"] = False
         for l in lora:
             log.info(f"Loading LoRA: {l['name']} with strength: {l['strength']}")
             lora_path = l["path"]
             lora_strength = l["strength"]
+            if isinstance(lora_strength, list):
+                patcher.model_options['transformer_options']["lora_scheduling_enabled"] = True
             if lora_strength == 0:
                 log.warning(f"LoRA {lora_path} has strength 0, skipping...")
                 continue
@@ -1073,6 +1077,8 @@ class WanVideoModelLoader:
                 log.info(f"Loading LoRA: {l['name']} with strength: {l['strength']}")
                 lora_path = l["path"]
                 lora_strength = l["strength"]
+                if isinstance(lora_strength, list):
+                    transformer.lora_scheduling_enabled = True
                 if lora_strength == 0:
                     log.warning(f"LoRA {lora_path} has strength 0, skipping...")
                     continue

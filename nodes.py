@@ -1468,6 +1468,8 @@ class WanVideoSampler:
             log.info("Unloading all LoRAs")
             remove_lora_from_module(transformer)
 
+        transformer.lora_scheduling_enabled = transformer_options.get("lora_scheduling_enabled", False)
+
         #torch.compile
         if model["auto_cpu_offload"] is False:
             transformer = compile_model(transformer, model["compile_args"])

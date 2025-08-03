@@ -1096,6 +1096,7 @@ class WanModel(torch.nn.Module):
         self.use_non_blocking = False
 
         self.video_attention_split_steps = []
+        self.lora_scheduling_enabled = False
 
         # embeddings
         self.patch_embedding = nn.Conv3d(
@@ -1384,7 +1385,12 @@ class WanModel(torch.nn.Module):
         Returns:
             List[Tensor]:
                 List of denoised video tensors with original input shapes [C_out, F, H / 8, W / 8]
-        """        
+        """
+        if self.lora_scheduling_enabled:
+            for name, submodule in self.named_modules():
+                if isinstance(submodule, nn.Linear):
+                    if hasattr(submodule, 'step'):
+                        submodule.step = current_step
         # params
         device = self.patch_embedding.weight.device
         if freqs is not None and freqs.device != device:
