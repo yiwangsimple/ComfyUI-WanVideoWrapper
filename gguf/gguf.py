@@ -106,7 +106,9 @@ class GGUFLinear(nn.Linear):
             if isinstance(lora_strength, list):
                 lora_strength = lora_strength[step]
                 if lora_strength == 0.0:
-                    return weight
+                    continue
+            elif lora_strength == 0.0:
+                continue
             patch_diff = torch.mm(
                 lora_diff[0].flatten(start_dim=1).to(weight.device),
                 lora_diff[1].flatten(start_dim=1).to(weight.device)
