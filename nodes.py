@@ -932,10 +932,48 @@ class WanVideoEmptyEmbeds:
             "target_shape": target_shape,
             "num_frames": num_frames,
             "control_embeds": control_embeds["control_embeds"] if control_embeds is not None else None,
-            "extra_latents": extra_latents
+            "extra_latents": [{
+                "samples": extra_latents["samples"],
+                "index": 0,
+            }]
         }
     
         return (embeds,)
+    
+class WanVideoAddExtraLatent:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {
+                    "embeds": ("WANVIDIMAGE_EMBEDS",),
+                    "extra_latents": ("LATENT",),
+                    "latent_index": ("INT", {"default": 0, "min": -1000, "max": 1000, "step": 1, "tooltip": "Index to insert the extra latents at in latent space"}),
+                }
+        }
+
+    RETURN_TYPES = ("WANVIDIMAGE_EMBEDS",)
+    RETURN_NAMES = ("image_embeds",)
+    FUNCTION = "add"
+    CATEGORY = "WanVideoWrapper"
+
+    def add(self, embeds, extra_latents, latent_index):
+        # Prepare the new extra latent entry
+        new_entry = {
+            "samples": extra_latents["samples"],
+            "index": latent_index,
+        }
+        # Get previous extra_latents list, or start a new one
+        prev_extra_latents = embeds.get("extra_latents", None)
+        if prev_extra_latents is None:
+            extra_latents_list = [new_entry]
+        elif isinstance(prev_extra_latents, list):
+            extra_latents_list = prev_extra_latents + [new_entry]
+        else:
+            extra_latents_list = [prev_extra_latents, new_entry]
+
+        # Return a new dict with updated extra_latents
+        updated = dict(embeds)
+        updated["extra_latents"] = extra_latents_list
+        return (updated,)
 
 class WanVideoMiniMaxRemoverEmbeds:
     @classmethod
@@ -1863,18 +1901,15 @@ class WanVideoSampler:
                     mask = torch.cat([torch.zeros(1, noise.shape[0], noise.shape[1] - mask.shape[2], noise.shape[2], noise.shape[3]), mask], dim=2)
         
         # extra latents (Pusa) and 5b
-        latents_to_insert = None
+        latents_to_insert = add_index = None
         if (extra_latents := image_embeds.get("extra_latents", None)) is not None:
-            latents_to_insert = extra_latents["samples"].squeeze(0).to(noise)
-            num_latents_to_insert = latents_to_insert.shape[1]
-            if (empty_latent_indices := extra_latents.get("empty_latent_indices", None)) is not None and len(empty_latent_indices) > 0:
-                noise_out = latents_to_insert.clone()
-                for idx in empty_latent_indices:
-                    #print(f"Adding noise to Empty latent index: {idx}")
-                    noise_out[:, idx] = noise[:, idx]
-                noise = noise_out
-            else:
-                noise[:,0:num_latents_to_insert] = latents_to_insert
+            all_indices = []
+            for entry in extra_latents:
+                add_index = entry["index"]
+                noise[:, add_index] = entry["samples"].squeeze(0).squeeze(1).to(noise)
+                log.info(f"Adding extra samples to latent index {add_index}")
+                all_indices.append(add_index)
+        
 
         latent = noise.to(device)
 
@@ -2489,15 +2524,13 @@ class WanVideoSampler:
                 current_step_percentage = idx / len(timesteps)
 
                 timestep = torch.tensor([t]).to(device)
-                if scheduler == "flowmatch_pusa" or (is_5b and latents_to_insert is not None):
+                if scheduler == "flowmatch_pusa" or (is_5b and 'all_indices' in locals()):
+                    orig_timestep = timestep
                     timestep = timestep.unsqueeze(1).repeat(1, latent_video_length)
                     if extra_latents is not None:
-                        if empty_latent_indices is not None and len(empty_latent_indices) > 0:
-                            # Set timestep to zero for all non-noise (non-empty) indices
-                            non_noise_indices = [i for i in range(timestep.shape[1]) if i not in empty_latent_indices]
-                            timestep[:, non_noise_indices] = 0
-                        else:
-                            timestep[:,0:num_latents_to_insert] = 0                
+                        if 'all_indices' in locals() and all_indices:
+                            timestep[:, all_indices] = 0
+                        print("timestep: ", timestep)
 
                 ### latent shift
                 if latent_shift_loop:
@@ -2715,7 +2748,7 @@ class WanVideoSampler:
 
                         partial_latent_model_input = latent_model_input[:, c]
                         if latents_to_insert is not None and c[0] != 0:
-                            partial_latent_model_input[:, 0:num_latents_to_insert] = latents_to_insert
+                            partial_latent_model_input[:, :1] = latents_to_insert
 
                         partial_unianim_data = None
                         if unianim_data is not None:
@@ -2735,7 +2768,7 @@ class WanVideoSampler:
 
                         if len(timestep.shape) != 1:
                             partial_timestep = timestep[:, c]
-                            partial_timestep[:, :num_latents_to_insert] = 0
+                            partial_timestep[:, :1] = 0
                         else:
                             partial_timestep = timestep
                         #print("Partial timestep:", partial_timestep)
@@ -3028,13 +3061,28 @@ class WanVideoSampler:
                 if flowedit_args is None:
                     latent = latent.to(intermediate_device)
                     
-                    if len(timestep.shape) != 1 and scheduler != "flowmatch_pusa": #pusa and 5b
-                        latent_slice = sample_scheduler.step(
-                            noise_pred[:, num_latents_to_insert:].unsqueeze(0),
-                            timestep.flatten()[-1],
-                            latent[:, num_latents_to_insert:].unsqueeze(0),
-                            **scheduler_step_args)[0].squeeze(0)
-                        latent = torch.cat([latent[:, :num_latents_to_insert], latent_slice], dim=1)                    
+                    if len(timestep.shape) != 1 and scheduler != "flowmatch_pusa": #5b
+                        # all_indices is a list of indices to skip
+                        total_indices = list(range(latent.shape[1]))
+                        process_indices = [i for i in total_indices if i not in all_indices]
+                        if process_indices:
+                            latent_to_process = latent[:, process_indices]
+                            noise_pred_to_process = noise_pred[:, process_indices]
+                            latent_slice = sample_scheduler.step(
+                                noise_pred_to_process.unsqueeze(0),
+                                orig_timestep,
+                                latent_to_process.unsqueeze(0),
+                                **scheduler_step_args
+                            )[0].squeeze(0)
+                        # Reconstruct the latent tensor: keep skipped indices as-is, update others
+                        new_latent = []
+                        for i in total_indices:
+                            if i in all_indices:
+                                new_latent.append(latent[:, i:i+1])
+                            else:
+                                j = process_indices.index(i)
+                                new_latent.append(latent_slice[:, j:j+1])
+                        latent = torch.cat(new_latent, dim=1)
                     else:
                         latent = sample_scheduler.step(
                             noise_pred[:, :orig_noise_len].unsqueeze(0) if recammaster is not None else noise_pred.unsqueeze(0),
@@ -3235,31 +3283,31 @@ class WanVideoEncode:
         image = image.to(vae.dtype).to(device).unsqueeze(0).permute(0, 4, 1, 2, 3) # B, C, T, H, W
 
 
-        empty_frame_indices = []
-        for i in range(image.shape[2]):
-            if is_image_black(image[:, :, i]):
-                empty_frame_indices.append(i)
-        empty_frame_indices = []
-        for i in range(image.shape[2]):
-            if is_image_black(image[:, :, i]):
-                empty_frame_indices.append(i)
-        empty_latent_indices = []
-        if empty_frame_indices:
-            frames_per_latent = 4
-            num_frames = image.shape[2]
-            # Special mapping: latent 0 = [0], latent 1 = [1,2,3,4], latent 2 = [5,6,7,8], ...
-            latent_frame_ranges = []
-            latent_frame_ranges.append([0])
-            for i in range(1, math.ceil((num_frames - 1) / frames_per_latent) + 1):
-                start = 1 + (i - 1) * frames_per_latent
-                end = min(start + frames_per_latent, num_frames)
-                latent_frame_ranges.append(list(range(start, end)))
-            for latent_idx, latent_frames in enumerate(latent_frame_ranges):
-                print(f"latent {latent_idx}: frames {latent_frames}")
-                if latent_frames and set(latent_frames).issubset(empty_frame_indices):
-                    empty_latent_indices.append(latent_idx)
-            if empty_latent_indices:
-                log.info(f"Empty frames {empty_frame_indices} map to latents {empty_latent_indices}")
+        # empty_frame_indices = []
+        # for i in range(image.shape[2]):
+        #     if is_image_black(image[:, :, i]):
+        #         empty_frame_indices.append(i)
+        # empty_frame_indices = []
+        # for i in range(image.shape[2]):
+        #     if is_image_black(image[:, :, i]):
+        #         empty_frame_indices.append(i)
+        # empty_latent_indices = []
+        # if empty_frame_indices:
+        #     frames_per_latent = 4
+        #     num_frames = image.shape[2]
+        #     # Special mapping: latent 0 = [0], latent 1 = [1,2,3,4], latent 2 = [5,6,7,8], ...
+        #     latent_frame_ranges = []
+        #     latent_frame_ranges.append([0])
+        #     for i in range(1, math.ceil((num_frames - 1) / frames_per_latent) + 1):
+        #         start = 1 + (i - 1) * frames_per_latent
+        #         end = min(start + frames_per_latent, num_frames)
+        #         latent_frame_ranges.append(list(range(start, end)))
+        #     for latent_idx, latent_frames in enumerate(latent_frame_ranges):
+        #         print(f"latent {latent_idx}: frames {latent_frames}")
+        #         if latent_frames and set(latent_frames).issubset(empty_frame_indices):
+        #             empty_latent_indices.append(latent_idx)
+        #     if empty_latent_indices:
+        #         log.info(f"Empty frames {empty_frame_indices} map to latents {empty_latent_indices}")
         
 
         if noise_aug_strength > 0.0:
@@ -3297,7 +3345,7 @@ class WanVideoEncode:
             vae.to(offload_device)
         mm.soft_empty_cache()
  
-        return ({"samples": latents, "mask": latent_mask, "empty_latent_indices": empty_latent_indices},)
+        return ({"samples": latents, "mask": latent_mask},)
 
 NODE_CLASS_MAPPINGS = {
     "WanVideoSampler": WanVideoSampler,
@@ -3326,6 +3374,7 @@ NODE_CLASS_MAPPINGS = {
     "WanVideoSetRadialAttention": WanVideoSetRadialAttention,
     "WanVideoBlockList": WanVideoBlockList,
     "WanVideoTextEncodeCached": WanVideoTextEncodeCached,
+    "WanVideoAddExtraLatent": WanVideoAddExtraLatent,
     }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "WanVideoSampler": "WanVideo Sampler",
@@ -3355,4 +3404,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "WanVideoSetRadialAttention": "WanVideo Set Radial Attention",
     "WanVideoBlockList": "WanVideo Block List",
     "WanVideoTextEncodeCached": "WanVideo TextEncode Cached",
+    "WanVideoAddExtraLatent": "WanVideo Add Extra Latent",
     }
