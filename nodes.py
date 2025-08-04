@@ -934,8 +934,11 @@ class WanVideoEmptyEmbeds:
             "control_embeds": control_embeds["control_embeds"] if control_embeds is not None else None,
         }
         if extra_latents is not None:
-            embeds["extra_latents"] = extra_latents["samples"].squeeze(0)
-    
+            embeds["extra_latents"] = [{
+                "samples": extra_latents["samples"],
+                "index": 0,
+            }]
+
         return (embeds,)
     
 class WanVideoAddExtraLatent:
