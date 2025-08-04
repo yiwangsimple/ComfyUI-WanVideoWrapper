@@ -1312,6 +1312,7 @@ class WanVideoVAELoader:
                 "precision": (["fp16", "fp32", "bf16"],
                     {"default": "bf16"}
                 ),
+                "compile_args": ("WANCOMPILEARGS", ),
             }
         }
 
@@ -1321,7 +1322,7 @@ class WanVideoVAELoader:
     CATEGORY = "WanVideoWrapper"
     DESCRIPTION = "Loads Wan VAE model from 'ComfyUI/models/vae'"
 
-    def loadmodel(self, model_name, precision):
+    def loadmodel(self, model_name, precision, compile_args=None):
         from .wanvideo.wan_video_vae import WanVideoVAE, WanVideoVAE38
 
         dtype = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": torch.float32}[precision]
@@ -1342,7 +1343,9 @@ class WanVideoVAELoader:
         vae.load_state_dict(vae_sd)
         vae.eval()
         vae.to(device = offload_device, dtype = dtype)
-            
+        if compile_args is not None:
+            vae.model.decoder = torch.compile(vae.model.decoder, fullgraph=compile_args["fullgraph"], dynamic=compile_args["dynamic"], backend=compile_args["backend"], mode=compile_args["mode"])
+            print(vae)
 
         return (vae,)
 
