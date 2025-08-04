@@ -482,7 +482,8 @@ class WanVideoLoraSelectMulti:
             (lora_4, strength_4)
         ]
         for lora_name, strength in lora_inputs:
-            s = round(strength, 4)
+            if not isinstance(strength, list):
+                s = round(strength, 4)
             if not lora_name or lora_name == "none" or s == 0.0:
                 continue
             loras_list.append({
