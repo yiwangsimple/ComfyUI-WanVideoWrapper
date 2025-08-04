@@ -13,7 +13,7 @@ from .wanvideo.schedulers import get_scheduler, get_sampling_sigmas, retrieve_ti
 from .gguf.gguf import set_lora_params
 from .multitalk.multitalk import timestep_transform, add_noise
 from .utils import(log, print_memory, apply_lora, clip_encode_image_tiled, fourier_filter, 
-                   is_image_black, add_noise_to_reference_video, optimized_scale, setup_radial_attention, 
+                   add_noise_to_reference_video, optimized_scale, setup_radial_attention, 
                    compile_model, dict_to_device, tangential_projection, set_module_tensor_to_device)
 from .cache_methods.cache_methods import cache_report
 from .enhance_a_video.globals import set_enhance_weight, set_num_frames
@@ -1183,7 +1183,7 @@ class WanVideoVACEEncode:
         if input_masks is None:
             input_masks = torch.ones_like(input_frames, device=device)
         else:
-            print("input_masks shape", input_masks.shape)
+            log.info(f"input_masks shape: {input_masks.shape}")
             input_masks = input_masks[:num_frames]
             input_masks = common_upscale(input_masks.clone().unsqueeze(1), width, height, "nearest-exact", "disabled").squeeze(1)
             input_masks = input_masks.to(vae.dtype).to(device)
@@ -1262,7 +1262,6 @@ class WanVideoVACEEncode:
                 if masks is None:
                     ref_latent = vae.encode(refs, device=device, tiled=tiled_vae)
                 else:
-                    print("refs shape", refs.shape)#torch.Size([3, 1, 512, 512])
                     ref_latent = vae.encode(refs, device=device, tiled=tiled_vae)
                     ref_latent = [torch.cat((u, torch.zeros_like(u)), dim=0) for u in ref_latent]
                 assert all([x.shape[1] == 1 for x in ref_latent])
@@ -1742,6 +1741,9 @@ class WanVideoSampler:
                 phantom_latents = phantom_latents.to(device)
 
         latent_video_length = noise.shape[1]
+
+        if noise.shape[2] % (vae_upscale_factor/4) != 0 or noise.shape[3] % (vae_upscale_factor/4) != 0:
+            raise ValueError(f"Width ({noise.shape[3] * vae_upscale_factor}) and height ({noise.shape[2] * vae_upscale_factor}) must be divisible by {vae_upscale_factor*2}. Got {noise.shape[3] * vae_upscale_factor}x{noise.shape[2] * vae_upscale_factor}.")
 
         # Initialize FreeInit filter if enabled
         freq_filter = None
@@ -2233,7 +2235,7 @@ class WanVideoSampler:
                         for human_idx in range(human_num):
                             audio_start = context_window[0] * 4
                             audio_end = context_window[-1] * 4 + 1
-                            print("audio_start: ", audio_start, "audio_end: ", audio_end)
+                            #print("audio_start: ", audio_start, "audio_end: ", audio_end)
                             center_indices = torch.arange(audio_start, audio_end, 1).unsqueeze(1) + indices.unsqueeze(0)
                             center_indices = torch.clamp(center_indices, min=0, max=audio_embedding[human_idx].shape[0] - 1)
                             audio_emb = audio_embedding[human_idx][center_indices].unsqueeze(0).to(device)
@@ -2531,7 +2533,7 @@ class WanVideoSampler:
                     if extra_latents is not None:
                         if 'all_indices' in locals() and all_indices:
                             timestep[:, all_indices] = 0
-                        print("timestep: ", timestep)
+                        #print("timestep: ", timestep)
 
                 ### latent shift
                 if latent_shift_loop:
