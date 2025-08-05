@@ -1742,8 +1742,8 @@ class WanVideoSampler:
 
         latent_video_length = noise.shape[1]
 
-        if noise.shape[2] % (vae_upscale_factor/4) != 0 or noise.shape[3] % (vae_upscale_factor/4) != 0:
-            raise ValueError(f"Width ({noise.shape[3] * vae_upscale_factor}) and height ({noise.shape[2] * vae_upscale_factor}) must be divisible by {vae_upscale_factor*2}. Got {noise.shape[3] * vae_upscale_factor}x{noise.shape[2] * vae_upscale_factor}.")
+        #if noise.shape[2] % (vae_upscale_factor/4) != 0 or noise.shape[3] % (vae_upscale_factor/4) != 0:
+        #    raise ValueError(f"Width ({noise.shape[3] * vae_upscale_factor}) and height ({noise.shape[2] * vae_upscale_factor}) must be divisible by {vae_upscale_factor*2}. Got {noise.shape[3] * vae_upscale_factor}x{noise.shape[2] * vae_upscale_factor}.")
 
         # Initialize FreeInit filter if enabled
         freq_filter = None
