@@ -110,14 +110,15 @@ class WanVideoPromptExtender:
         },
         "optional": {
             "system_prompt": (SYSTEM_PROMPT_KEYS, {"tooltip": "System prompt to use for the model."}),
-            "custom_system_prompt": ("STRING", {"default": "", "forceInput": True, "tooltip": "Custom system prompt to use instead of the predefined ones."})
+            "custom_system_prompt": ("STRING", {"default": "", "forceInput": True, "tooltip": "Custom system prompt to use instead of the predefined ones."}),
+            "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
         }
         }
     RETURN_TYPES = ("STRING",)
     FUNCTION = "generate"
     CATEGORY = "WanVideoWrapper"
 
-    def generate(self, qwen, prompt, device, force_offload, max_new_tokens, system_prompt=None, custom_system_prompt=None):
+    def generate(self, qwen, prompt, device, force_offload, max_new_tokens, system_prompt=None, custom_system_prompt=None, seed=0):
         if device == "gpu":
             device = mm.get_torch_device()
         elif device == "cpu":
@@ -135,14 +136,19 @@ class WanVideoPromptExtender:
         text = qwen.tokenizer.apply_chat_template(
             messages,
             tokenize=False,
-            add_generation_prompt=True
+            add_generation_prompt=True,
         )
         model_inputs = qwen.tokenizer([text], return_tensors="pt").to(device)
-        
+        torch.manual_seed(seed)
         qwen.model.to(device)
         generated_ids = qwen.model.generate(
             **model_inputs,
-            max_new_tokens=max_new_tokens
+            max_new_tokens=max_new_tokens,
+            do_sample=True,
+            temperature=0.7,
+            top_p=0.8,
+            top_k=20,
+            repetition_penalty=1.05,
         )
         if force_offload:
             qwen.model.to(offload_device)
@@ -163,7 +169,8 @@ class WanVideoPromptExtenderSelect:
             "system_prompt": (SYSTEM_PROMPT_KEYS, {"tooltip": "System prompt to use for the model."}),
         },
         "optional": {
-            "custom_system_prompt": ("STRING", {"default": "", "forceInput": True, "tooltip": "Custom system prompt to use instead of the predefined ones."})
+            "custom_system_prompt": ("STRING", {"default": "", "forceInput": True, "tooltip": "Custom system prompt to use instead of the predefined ones."}),
+            "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
         }
         }
     RETURN_TYPES = ("WANVIDEOPROMPTEXTENDER_ARGS",)
@@ -171,7 +178,7 @@ class WanVideoPromptExtenderSelect:
     FUNCTION = "set"
     CATEGORY = "WanVideoWrapper"
 
-    def set(self, model, system_prompt, max_new_tokens, custom_system_prompt=None):
+    def set(self, model, system_prompt, max_new_tokens, custom_system_prompt=None, seed=0):
 
         if custom_system_prompt is None:
             sys_prompt = next((item["prompt"] for item in SYSTEM_PROMPT_MAP if item["label"] == system_prompt), "")
@@ -183,7 +190,8 @@ class WanVideoPromptExtenderSelect:
             "system_prompt": sys_prompt,
             "max_new_tokens": max_new_tokens,
             "device": "gpu",
-            "force_offload": True
+            "force_offload": True,
+            "seed": seed
         }
 
         return (extender_settings,)

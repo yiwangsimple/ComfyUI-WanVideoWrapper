@@ -268,6 +268,7 @@ of the original Wan templates or a custom system prompt.
                     device=device,
                     force_offload=False,
                     custom_system_prompt=extender_args["system_prompt"],
+                    seed=extender_args["seed"]
                 )
                 log.info(f"Extended positive prompt: {positive_prompt}")
                 _extender_cache[extender_key] = positive_prompt
@@ -1540,6 +1541,9 @@ class WanVideoSampler:
         
         steps = len(timesteps)
 
+        if end_step != -1 and start_step >= end_step:
+            raise ValueError("start_step must be less than end_step")
+
         if denoise_strength < 1.0:
             if start_step != 0:
                 raise ValueError("start_step must be 0 when denoise_strength is used")
@@ -1741,9 +1745,6 @@ class WanVideoSampler:
                 phantom_latents = phantom_latents.to(device)
 
         latent_video_length = noise.shape[1]
-
-        #if noise.shape[2] % (vae_upscale_factor/4) != 0 or noise.shape[3] % (vae_upscale_factor/4) != 0:
-        #    raise ValueError(f"Width ({noise.shape[3] * vae_upscale_factor}) and height ({noise.shape[2] * vae_upscale_factor}) must be divisible by {vae_upscale_factor*2}. Got {noise.shape[3] * vae_upscale_factor}x{noise.shape[2] * vae_upscale_factor}.")
 
         # Initialize FreeInit filter if enabled
         freq_filter = None
@@ -2466,10 +2467,21 @@ class WanVideoSampler:
         current_latent = latent
         
         for iter_idx in range(iterations): 
+
             # FreeInit noise reinitialization (after first iteration)
             if freeinit_args is not None and iter_idx > 0:
                 # restart scheduler for each iteration
                 sample_scheduler, timesteps = get_scheduler(scheduler, steps, shift, device, transformer.dim, flowedit_args, denoise_strength, sigmas=sigmas)
+
+                # Re-apply start_step and end_step logic to timesteps and sigmas
+                if end_step != -1:
+                    timesteps = timesteps[:end_step]
+                    sample_scheduler.sigmas = sample_scheduler.sigmas[:end_step+1]
+                if start_step > 0:
+                    timesteps = timesteps[start_step:]
+                    sample_scheduler.sigmas = sample_scheduler.sigmas[start_step:]
+                if hasattr(sample_scheduler, 'timesteps'):
+                    sample_scheduler.timesteps = timesteps
 
                 # Diffuse current latent to t=999
                 diffuse_timesteps = torch.full((noise.shape[0],), 999, device=device, dtype=torch.long)
