@@ -1365,7 +1365,7 @@ class WanVideoTinyVAELoader:
     RETURN_NAMES = ("vae", )
     FUNCTION = "loadmodel"
     CATEGORY = "WanVideoWrapper"
-    DESCRIPTION = "Loads Wan VAE model from 'ComfyUI/models/vae'"
+    DESCRIPTION = "Loads Wan VAE model from 'ComfyUI/models/vae_approx'"
 
     def loadmodel(self, model_name, precision, parallel=False):
         from .taehv import TAEHV
