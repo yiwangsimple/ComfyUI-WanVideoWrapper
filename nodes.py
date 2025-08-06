@@ -3214,8 +3214,6 @@ class WanVideoDecode:
         if drop_last:
             latents = latents[:, :, :-1]
 
-        #if is_looped:
-        #   latents = torch.cat([latents[:, :, :warmup_latent_count],latents], dim=2)
         if type(vae).__name__ == "TAEHV":      
             images = vae.decode_video(latents.permute(0, 2, 1, 3, 4))[0].permute(1, 0, 2, 3)
             images = torch.clamp(images, 0.0, 1.0)
@@ -3227,34 +3225,30 @@ class WanVideoDecode:
             images = vae.decode(latents, device=device, end_=(end_image is not None), tiled=enable_vae_tiling, tile_size=(tile_x//8, tile_y//8), tile_stride=(tile_stride_x//8, tile_stride_y//8))[0]
             vae.model.clear_cache()
         
-        images = images.cpu()
+        images = images.cpu().float()
 
         if normalization == "minmax":
-            images = (images - images.min()) / (images.max() - images.min())
+            images.sub_(images.min()).div_(images.max() - images.min())
         else:  
-            images = torch.clamp(images, -1.0, 1.0) 
-            images = (images + 1.0) / 2.0
+            images.clamp_(-1.0, 1.0)
+            images.add_(1.0).div_(2.0)
         
         if is_looped:
-            #images = images[:, warmup_latent_count * 4:]
             temp_latents = torch.cat([latents[:, :, -3:]] + [latents[:, :, :2]], dim=2)
             temp_images = vae.decode(temp_latents, device=device, end_=(end_image is not None), tiled=enable_vae_tiling, tile_size=(tile_x//vae.upsampling_factor, tile_y//vae.upsampling_factor), tile_stride=(tile_stride_x//vae.upsampling_factor, tile_stride_y//vae.upsampling_factor))[0]
             temp_images = (temp_images - temp_images.min()) / (temp_images.max() - temp_images.min())
             images = torch.cat([temp_images[:, 9:].to(images), images[:, 5:]], dim=1)
 
         if end_image is not None: 
-            #end_image = (end_image - end_image.min()) / (end_image.max() - end_image.min())
-            #image[:, -1] = end_image[:, 0].to(image) #not sure about this
             images = images[:, 0:-1]
 
         vae.model.clear_cache()
         vae.to(offload_device)
         mm.soft_empty_cache()
 
-        images = torch.clamp(images, 0.0, 1.0)
-        images = images.permute(1, 2, 3, 0).float()
+        images.clamp_(0.0, 1.0)
 
-        return (images,)
+        return (images.permute(1, 2, 3, 0),)
 
 #region VideoEncode
 class WanVideoEncode:
@@ -3295,35 +3289,7 @@ class WanVideoEncode:
 
         if image.shape[-1] == 4:
             image = image[..., :3]
-        image = image.to(vae.dtype).to(device).unsqueeze(0).permute(0, 4, 1, 2, 3) # B, C, T, H, W
-
-
-        # empty_frame_indices = []
-        # for i in range(image.shape[2]):
-        #     if is_image_black(image[:, :, i]):
-        #         empty_frame_indices.append(i)
-        # empty_frame_indices = []
-        # for i in range(image.shape[2]):
-        #     if is_image_black(image[:, :, i]):
-        #         empty_frame_indices.append(i)
-        # empty_latent_indices = []
-        # if empty_frame_indices:
-        #     frames_per_latent = 4
-        #     num_frames = image.shape[2]
-        #     # Special mapping: latent 0 = [0], latent 1 = [1,2,3,4], latent 2 = [5,6,7,8], ...
-        #     latent_frame_ranges = []
-        #     latent_frame_ranges.append([0])
-        #     for i in range(1, math.ceil((num_frames - 1) / frames_per_latent) + 1):
-        #         start = 1 + (i - 1) * frames_per_latent
-        #         end = min(start + frames_per_latent, num_frames)
-        #         latent_frame_ranges.append(list(range(start, end)))
-        #     for latent_idx, latent_frames in enumerate(latent_frame_ranges):
-        #         print(f"latent {latent_idx}: frames {latent_frames}")
-        #         if latent_frames and set(latent_frames).issubset(empty_frame_indices):
-        #             empty_latent_indices.append(latent_idx)
-        #     if empty_latent_indices:
-        #         log.info(f"Empty frames {empty_frame_indices} map to latents {empty_latent_indices}")
-        
+        image = image.to(vae.dtype).to(device).unsqueeze(0).permute(0, 4, 1, 2, 3) # B, C, T, H, W        
 
         if noise_aug_strength > 0.0:
             image = add_noise_to_reference_video(image, ratio=noise_aug_strength)
@@ -3342,9 +3308,6 @@ class WanVideoEncode:
         if mask is None:
             vae.to(offload_device)
         else:
-            #latent_mask = mask.clone().to(vae.dtype).to(device) * 2.0 - 1.0
-            #latent_mask = latent_mask.unsqueeze(0).unsqueeze(0).repeat(1, 3, 1, 1, 1)
-            #latent_mask = vae.encode(latent_mask, device=device, tiled=enable_vae_tiling, tile_size=(tile_x, tile_y), tile_stride=(tile_stride_x, tile_stride_y))
             target_h, target_w = latents.shape[3:]
 
             mask = torch.nn.functional.interpolate(
@@ -3361,6 +3324,45 @@ class WanVideoEncode:
         mm.soft_empty_cache()
  
         return ({"samples": latents, "mask": latent_mask},)
+
+class WanVideoLatentReScale:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {
+                    "samples": ("LATENT",),
+                    "direction": (["comfy_to_wrapper", "wrapper_to_comfy"], {"tooltip": "Direction to rescale latents, from comfy to wrapper or vice versa"}),
+                }
+                }
+
+    RETURN_TYPES = ("LATENT",)
+    RETURN_NAMES = ("samples",)
+    FUNCTION = "encode"
+    CATEGORY = "WanVideoWrapper"
+    DESCRIPTION = "Rescale latents to match the expected range for encoding or decoding. Can be used to "
+
+    def encode(self, samples, direction):
+        samples = samples.copy()
+        latents = samples["samples"]
+
+        mean = [
+            -0.7571, -0.7089, -0.9113, 0.1075, -0.1745, 0.9653, -0.1517, 1.5508,
+            0.4134, -0.0715, 0.5517, -0.3632, -0.1922, -0.9497, 0.2503, -0.2921
+        ]
+        std = [
+            2.8184, 1.4541, 2.3275, 2.6558, 1.2196, 1.7708, 2.6052, 2.0743,
+            3.2687, 2.1526, 2.8652, 1.5579, 1.6382, 1.1253, 2.8251, 1.9160
+        ]
+        mean = torch.tensor(mean).view(1, latents.shape[1], 1, 1, 1)
+        std = torch.tensor(std).view(1, latents.shape[1], 1, 1, 1)
+        inv_std = (1.0 / std).view(1, latents.shape[1], 1, 1, 1)
+        if direction == "comfy_to_wrapper":
+            latents = (latents - mean.to(latents)) * inv_std.to(latents)
+        elif direction == "wrapper_to_comfy":
+            latents = latents / inv_std.to(latents) + mean.to(latents)
+
+        samples["samples"] = latents
+
+        return (samples,)
 
 NODE_CLASS_MAPPINGS = {
     "WanVideoSampler": WanVideoSampler,
@@ -3390,6 +3392,7 @@ NODE_CLASS_MAPPINGS = {
     "WanVideoBlockList": WanVideoBlockList,
     "WanVideoTextEncodeCached": WanVideoTextEncodeCached,
     "WanVideoAddExtraLatent": WanVideoAddExtraLatent,
+    "WanVideoLatentReScale": WanVideoLatentReScale,
     }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "WanVideoSampler": "WanVideo Sampler",
@@ -3420,4 +3423,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "WanVideoBlockList": "WanVideo Block List",
     "WanVideoTextEncodeCached": "WanVideo TextEncode Cached",
     "WanVideoAddExtraLatent": "WanVideo Add Extra Latent",
+    "WanVideoLatentReScale": "WanVideo Latent ReScale",
     }
