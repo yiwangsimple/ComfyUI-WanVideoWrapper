@@ -18,7 +18,7 @@ from ..utils import set_module_tensor_to_device, log
 from .system_prompt import SYSTEM_PROMPT_MAP
 SYSTEM_PROMPT_KEYS = [item["label"] for item in SYSTEM_PROMPT_MAP]
 
-config ={
+config_3b ={
   "architectures": [
     "Qwen2ForCausalLM"
   ],
@@ -46,6 +46,34 @@ config ={
   "vocab_size": 151936
 }
 
+config_7b ={
+  "architectures": [
+    "Qwen2ForCausalLM"
+  ],
+  "attention_dropout": 0.0,
+  "bos_token_id": 151643,
+  "eos_token_id": 151645,
+  "hidden_act": "silu",
+  "hidden_size": 3584,
+  "initializer_range": 0.02,
+  "intermediate_size": 18944,
+  "max_position_embeddings": 32768,
+  "max_window_layers": 28,
+  "model_type": "qwen2",
+  "num_attention_heads": 28,
+  "num_hidden_layers": 28,
+  "num_key_value_heads": 4,
+  "rms_norm_eps": 1e-06,
+  "rope_theta": 1000000.0,
+  "sliding_window": 131072,
+  "tie_word_embeddings": False,
+  "torch_dtype": "bfloat16",
+  "transformers_version": "4.43.1",
+  "use_cache": True,
+  "use_sliding_window": False,
+  "vocab_size": 152064
+}
+
 
 class QwenLoader:
     @classmethod
@@ -69,7 +97,14 @@ class QwenLoader:
         tokenizer_path = os.path.join(script_directory, "tokenizer")
         tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, trust_remote_code=True)
 
-        hf_config = Qwen2Config(**config)
+        hf_config = Qwen2Config(**config_3b if "3b" in model.lower() else config_7b)
+        
+        # Fix vocab size to match actual tokenizer
+        actual_vocab_size = len(tokenizer)
+        if hf_config.vocab_size != actual_vocab_size:
+            log.warning(f"Adjusting vocab_size from {hf_config.vocab_size} to {actual_vocab_size} to match tokenizer")
+            hf_config.vocab_size = actual_vocab_size
+            
         with init_empty_weights():
             hf_model = Qwen2ForCausalLM(hf_config)
         log.info("Using accelerate to load and assign model weights to device...")
@@ -87,10 +122,17 @@ class QwenLoader:
             pbar.update(1)
 
         hf_model.lm_head = nn.Linear(hf_model.config.hidden_size, hf_model.config.vocab_size, bias=False)
-        hf_model.lm_head.weight = hf_model.get_input_embeddings().weight
-        hf_model.lm_head.to(hf_model.device, dtype=base_dtype) 
+        
+        if hf_config.tie_word_embeddings:
+            hf_model.lm_head.weight = hf_model.get_input_embeddings().weight
+        else:
+            if "lm_head.weight" in sd:
+                set_module_tensor_to_device(hf_model, "lm_head.weight", device=transformer_load_device, dtype=base_dtype, value=sd["lm_head.weight"])
+            else:
+                hf_model.lm_head.weight = hf_model.get_input_embeddings().weight
+                
+        hf_model.lm_head.to(hf_model.device, dtype=base_dtype)
 
-        # Minimal pipeline-like wrapper
         class EmptyObj:
             pass
         qwen = EmptyObj()
