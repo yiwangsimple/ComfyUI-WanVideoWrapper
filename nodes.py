@@ -1965,7 +1965,8 @@ class WanVideoSampler:
             shot_num = len(text_embeds["prompt_embeds"])
             shot_len = [latent_video_length//shot_num] * (shot_num-1)
             shot_len.append(latent_video_length-sum(shot_len))
-            log.info(f"EchoShot - Number of shots in prompt: {shot_num}, Shot token lengths: {shot_len}")
+            rope_function = "default" #echoshot does not support comfy rope function
+            log.info(f"Number of shots in prompt: {shot_num}, Shot token lengths: {shot_len}")
 
         #region transformer settings
         #rope
@@ -2991,7 +2992,7 @@ class WanVideoSampler:
                         # cache generated samples
                         videos = torch.stack(videos).cpu() # B C T H W
                         if colormatch != "disabled":
-                            videos = videos[0].permute(1, 2, 3, 0).cpu().numpy()
+                            videos = videos[0].permute(1, 2, 3, 0).cpu().float().numpy()
                             from color_matcher import ColorMatcher
                             cm = ColorMatcher()
                             cm_result_list = []
@@ -3236,6 +3237,7 @@ class WanVideoDecode:
         if is_looped:
             temp_latents = torch.cat([latents[:, :, -3:]] + [latents[:, :, :2]], dim=2)
             temp_images = vae.decode(temp_latents, device=device, end_=(end_image is not None), tiled=enable_vae_tiling, tile_size=(tile_x//vae.upsampling_factor, tile_y//vae.upsampling_factor), tile_stride=(tile_stride_x//vae.upsampling_factor, tile_stride_y//vae.upsampling_factor))[0]
+            temp_images = temp_images.cpu().float()
             temp_images = (temp_images - temp_images.min()) / (temp_images.max() - temp_images.min())
             images = torch.cat([temp_images[:, 9:].to(images), images[:, 5:]], dim=1)
 
