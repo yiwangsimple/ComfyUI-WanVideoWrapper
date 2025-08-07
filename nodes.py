@@ -14,7 +14,7 @@ from .gguf.gguf import set_lora_params
 from .multitalk.multitalk import timestep_transform, add_noise
 from .utils import(log, print_memory, apply_lora, clip_encode_image_tiled, fourier_filter, 
                    add_noise_to_reference_video, optimized_scale, setup_radial_attention, 
-                   compile_model, dict_to_device, tangential_projection, set_module_tensor_to_device)
+                   compile_model, dict_to_device, tangential_projection, set_module_tensor_to_device, get_raag_guidance)
 from .cache_methods.cache_methods import cache_report
 from .enhance_a_video.globals import set_enhance_weight, set_num_frames
 from .taehv import TAEHV
@@ -1403,6 +1403,7 @@ class WanVideoExperimentalArgs:
                 "fresca_scale_high": ("FLOAT", {"default": 1.25, "min": 0.0, "max": 10.0, "step": 0.01}),
                 "fresca_freq_cutoff": ("INT", {"default": 20, "min": 0, "max": 10000, "step": 1}),
                 "use_tcfg": ("BOOLEAN", {"default": False, "tooltip": "https://arxiv.org/abs/2503.18137 TCFG: Tangential Damping Classifier-free Guidance. CFG artifacts reduction."}),
+                "raag_alpha": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 10.0, "step": 0.01, "tooltip": "Alpha value for RAAG, 1.0 is default, 0.0 is disabled."}),
             },
         }
 
@@ -1508,7 +1509,6 @@ class WanVideoSampler:
             else:
                 set_lora_params(transformer, patcher.patches)
         else:
-            log.info("Unloading all LoRAs")
             remove_lora_from_module(transformer)
 
         transformer.lora_scheduling_enabled = transformer_options.get("lora_scheduling_enabled", False)
@@ -2098,6 +2098,7 @@ class WanVideoSampler:
 
         # Experimental args
         use_cfg_zero_star = use_tangential = use_fresca = False
+        raag_alpha = 0.0
         if experimental_args is not None:
             video_attention_split_steps = experimental_args.get("video_attention_split_steps", [])
             if video_attention_split_steps:
@@ -2109,6 +2110,7 @@ class WanVideoSampler:
             use_cfg_zero_star = experimental_args.get("cfg_zero_star", False)
             use_tangential = experimental_args.get("use_tcfg", False)
             zero_star_steps = experimental_args.get("zero_star_steps", 0)
+            raag_alpha = experimental_args.get("raag_alpha", 0.0)
 
             use_fresca = experimental_args.get("use_fresca", False)
             if use_fresca:
@@ -2406,6 +2408,11 @@ class WanVideoSampler:
 
                 if use_tangential:
                     noise_pred_uncond_scaled = tangential_projection(noise_pred_cond, noise_pred_uncond_scaled)
+
+                # RAAG (RATIO-aware Adaptive Guidance)
+                if raag_alpha > 0.0:
+                    cfg_scale = get_raag_guidance(noise_pred_cond, noise_pred_uncond_scaled, cfg_scale, raag_alpha)
+                    log.info(f"RAAG modified cfg: {cfg_scale}")
 
                 #https://github.com/WikiChao/FreSca
                 if use_fresca:

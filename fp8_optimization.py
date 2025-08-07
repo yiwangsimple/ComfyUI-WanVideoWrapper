@@ -2,6 +2,7 @@
 
 import torch
 import torch.nn as nn
+from .utils import log
 
 def fp8_linear_forward(cls, original_dtype, input):
     weight_dtype = cls.weight.dtype
@@ -120,6 +121,10 @@ def convert_linear_with_lora_and_scale(module, scale_weight_keys=None, patches=N
 
 
 def remove_lora_from_module(module):
+    unloaded = False
     for name, submodule in module.named_modules():
         if hasattr(submodule, "lora"):
+            if not unloaded:
+                log.info("Unloading all LoRAs")
+                unloaded = True
             delattr(submodule, "lora")
