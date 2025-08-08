@@ -1257,6 +1257,8 @@ class WanVideoVACEEncode:
             latents = [torch.cat((u, c), dim=0) for u, c in zip(inactive, reactive)]
         vae.model.clear_cache()
         cat_latents = []
+
+        pbar = ProgressBar(len(frames))
         for latent, refs in zip(latents, ref_images):
             if refs is not None:
                 if masks is None:
@@ -1267,6 +1269,7 @@ class WanVideoVACEEncode:
                 assert all([x.shape[1] == 1 for x in ref_latent])
                 latent = torch.cat([*ref_latent, latent], dim=1)
             cat_latents.append(latent)
+            pbar.update(1)
         return cat_latents
 
     def vace_encode_masks(self, masks, ref_images=None):
@@ -1276,8 +1279,9 @@ class WanVideoVACEEncode:
             assert len(masks) == len(ref_images)
 
         result_masks = []
+        pbar = ProgressBar(len(masks))
         for mask, refs in zip(masks, ref_images):
-            c, depth, height, width = mask.shape
+            _c, depth, height, width = mask.shape
             new_depth = int((depth + 3) // VAE_STRIDE[0])
             height = 2 * (int(height) // (VAE_STRIDE[1] * 2))
             width = 2 * (int(width) // (VAE_STRIDE[2] * 2))
@@ -1300,6 +1304,7 @@ class WanVideoVACEEncode:
                 mask_pad = torch.zeros_like(mask[:, :length, :, :])
                 mask = torch.cat((mask_pad, mask), dim=1)
             result_masks.append(mask)
+            pbar.update(1)
         return result_masks
 
     def vace_latent(self, z, m):
