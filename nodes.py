@@ -2150,7 +2150,7 @@ class WanVideoSampler:
                             (control_end_percent > 0 and idx == 0 and current_step_percentage >= control_start_percent):
                             image_cond_input = torch.cat([control_latents.to(z), image_cond.to(z)])
                         else:
-                            image_cond_input = torch.cat([torch.zeros_like(image_cond, dtype=dtype), image_cond.to(z)])
+                            image_cond_input = torch.cat([torch.zeros_like(control_latents, dtype=dtype), image_cond.to(z)])
                         if fun_ref_image is not None:
                             fun_ref_input = fun_ref_image.to(z)
                         else:
