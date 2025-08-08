@@ -849,6 +849,7 @@ class WanVideoModelLoader:
         ffn_dim = sd["blocks.0.ffn.0.bias"].shape[0]
         ffn2_dim = sd["blocks.0.ffn.2.weight"].shape[1]
 
+        model_type = "t2v"
         if not "text_embedding.0.weight" in sd:
             model_type = "no_cross_attn" #minimaxremover
         elif "model_type.Wan2_1-FLF2V-14B-720P" in sd or "img_emb.emb_pos" in sd or "flf2v" in model.lower():
