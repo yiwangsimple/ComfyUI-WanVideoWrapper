@@ -8,7 +8,7 @@ import hashlib
 from diffusers.schedulers import FlowMatchEulerDiscreteScheduler
 
 from .wanvideo.modules.model import rope_params
-from .fp8_optimization import convert_linear_with_lora_and_scale, remove_lora_from_module
+from .fp8_optimization_v2 import remove_lora_from_module, set_lora_params as set_lora_params_fp8
 from .wanvideo.schedulers import get_scheduler, get_sampling_sigmas, retrieve_timesteps, scheduler_list
 from .gguf.gguf import set_lora_params
 from .multitalk.multitalk import timestep_transform, add_noise
@@ -1499,19 +1499,26 @@ class WanVideoSampler:
         transformer = model.diffusion_model
 
         dtype = model["dtype"]
+        fp8_matmul = model["fp8_matmul"]
         gguf = model["gguf"]
+        scale_weights = model["scale_weights"]
         control_lora = model["control_lora"]
+
         transformer_options = patcher.model_options.get("transformer_options", None)
+        merge_loras = transformer_options["merge_loras"]
 
         is_5b = transformer.out_dim == 48
         vae_upscale_factor = 16 if is_5b else 8
 
-        if len(patcher.patches) != 0 and transformer_options.get("linear_with_lora", False) is True:
+        patch_linear = transformer_options.get("patch_linear", False)
+
+        if gguf:
+            set_lora_params(transformer, patcher.patches)
+        elif len(patcher.patches) != 0 and patch_linear:
             log.info(f"Using {len(patcher.patches)} LoRA weight patches for WanVideo model")
-            if not gguf:
-                convert_linear_with_lora_and_scale(transformer, patches=patcher.patches)
-            else:
-                set_lora_params(transformer, patcher.patches)
+            if not merge_loras and fp8_matmul:
+                raise NotImplementedError("FP8 matmul with unmerged LoRAs is not supported")
+            set_lora_params_fp8(transformer, patcher.patches)
         else:
             remove_lora_from_module(transformer)
 
@@ -1924,10 +1931,11 @@ class WanVideoSampler:
             all_indices = []
             for entry in extra_latents:
                 add_index = entry["index"]
-                noise[:, add_index] = entry["samples"].squeeze(0).squeeze(1).to(noise)
-                log.info(f"Adding extra samples to latent index {add_index}")
-                all_indices.append(add_index)
-        
+                num_extra_frames = entry["samples"].shape[2]
+                noise[:, add_index:add_index+num_extra_frames] = entry["samples"].to(noise)
+                log.info(f"Adding extra samples to latent indices {add_index} to {add_index+num_extra_frames-1}")
+                all_indices.extend(range(add_index, add_index+num_extra_frames))
+
 
         latent = noise.to(device)
 
@@ -3172,7 +3180,7 @@ class WanVideoSampler:
             "drop_last": drop_last,
             "generator_state": seed_g.get_state(),
         },{
-            "samples": callback_latent.unsqueeze(0).cpu(), 
+            "samples": callback_latent.unsqueeze(0).cpu() if callback is not None else None, 
         })
 
 #region VideoDecode
