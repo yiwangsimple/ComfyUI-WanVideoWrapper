@@ -148,8 +148,8 @@ class WanVideoDiffusionForcingSampler:
 
         fp8_matmul = model["fp8_matmul"]
         gguf = model["gguf"]
-        merge_loras = transformer_options["merge_loras"]
         transformer_options = patcher.model_options.get("transformer_options", None)
+        merge_loras = transformer_options["merge_loras"]
 
         patch_linear = transformer_options.get("patch_linear", False)
 
