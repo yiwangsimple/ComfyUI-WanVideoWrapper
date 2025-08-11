@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 from einops import repeat, rearrange
 from ...enhance_a_video.enhance import get_feta_scores
-
+import time
 try:
     from torch.nn.attention.flex_attention import create_block_mask, flex_attention, BlockMask
     create_block_mask = torch.compile(create_block_mask)
@@ -29,7 +29,7 @@ from ...cache_methods.cache_methods import TeaCacheState, MagCacheState, EasyCac
 from ...multitalk.multitalk import get_attn_map_with_target
 from ...echoshot.echoshot import rope_apply_z, rope_apply_c, rope_apply_echoshot
 
-from comfy.model_management import get_torch_device, get_autocast_device
+from comfy.model_management import get_torch_device, get_autocast_device, get_offload_stream
 from comfy.ldm.flux.math import apply_rope as apply_rope_comfy
 
 def apply_rope_comfy_chunked(xq, xk, freqs_cis, num_chunks=4):
@@ -1094,6 +1094,8 @@ class WanModel(torch.nn.Module):
         self.slg_end_percent = 1.0
 
         self.use_non_blocking = False
+        self.prefetch_blocks = 0
+        self.block_swap_debug = False
 
         self.video_attention_split_steps = []
         self.lora_scheduling_enabled = False
@@ -1234,9 +1236,11 @@ class WanModel(torch.nn.Module):
 
         return block_mask
 
-    def block_swap(self, blocks_to_swap, offload_txt_emb=False, offload_img_emb=False, vace_blocks_to_swap=None):
+    def block_swap(self, blocks_to_swap, offload_txt_emb=False, offload_img_emb=False, vace_blocks_to_swap=None, prefetch_blocks=0, block_swap_debug=False):
         log.info(f"Swapping {blocks_to_swap + 1} transformer blocks")
         self.blocks_to_swap = blocks_to_swap
+        self.prefetch_blocks = prefetch_blocks
+        self.block_swap_debug = block_swap_debug
         
         self.offload_img_emb = offload_img_emb
         self.offload_txt_emb = offload_txt_emb
@@ -1811,15 +1815,47 @@ class WanModel(torch.nn.Module):
                             device=self.offload_device)
                     self.controlnet.to(self.offload_device)
 
+            # Asynchronous block offloading with CUDA streams and events
+            cuda_stream = mm.get_offload_stream(device)
+            events = [torch.cuda.Event() for _ in self.blocks]
+
             for b, block in enumerate(self.blocks):
+                # Prefetch blocks if enabled
+                if self.prefetch_blocks > 0:
+                    for prefetch_offset in range(1, self.prefetch_blocks + 1):
+                        prefetch_idx = b + prefetch_offset
+                        if prefetch_idx < len(self.blocks) and self.blocks_to_swap >= 0 and prefetch_idx <= self.blocks_to_swap:
+                            with torch.cuda.stream(cuda_stream):
+                                self.blocks[prefetch_idx].to(self.main_device, non_blocking=self.use_non_blocking)
+                                events[prefetch_idx].record(cuda_stream)
+                if self.block_swap_debug:
+                    transfer_start = time.perf_counter()
+                # Wait for block to be ready
+                if b <= self.blocks_to_swap and self.blocks_to_swap >= 0:
+                    if self.prefetch_blocks > 0:
+                        if not events[b].query():
+                            events[b].synchronize()
+                    block.to(self.main_device)
+                if self.block_swap_debug:
+                    transfer_end = time.perf_counter()
+                    transfer_time = transfer_end - transfer_start
+                    compute_start = time.perf_counter()
                 #skip layer guidance
                 if self.slg_blocks is not None:
                     if b in self.slg_blocks and is_uncond:
                         if self.slg_start_percent <= current_step_percentage <= self.slg_end_percent:
                             continue
-                if b <= self.blocks_to_swap and self.blocks_to_swap >= 0:
-                    block.to(self.main_device)
                 x = block(x, **kwargs)
+                if self.block_swap_debug:
+                    compute_end = time.perf_counter()
+                    compute_time = compute_end - compute_start
+                    to_cpu_transfer_start = time.perf_counter()
+                if b <= self.blocks_to_swap and self.blocks_to_swap >= 0:
+                    block.to(self.offload_device, non_blocking=self.use_non_blocking)
+                if self.block_swap_debug:
+                    to_cpu_transfer_end = time.perf_counter()
+                    to_cpu_transfer_time = to_cpu_transfer_end - to_cpu_transfer_start
+                    log.info(f"Block {b}: transfer_time={transfer_time:.4f}s, compute_time={compute_time:.4f}s, to_cpu_transfer_time={to_cpu_transfer_time:.4f}s")
 
                 #uni3c controlnet
                 if pdc_controlnet_states is not None and b < len(pdc_controlnet_states):
