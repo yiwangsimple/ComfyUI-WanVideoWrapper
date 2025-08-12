@@ -1141,7 +1141,7 @@ class WanVideoModelLoader:
                     transformer.expanded_patch_embedding = new_in
 
                 if "diffusion_model.blocks.0.self_attn.q_loras.down.weight" in lora_sd:                        
-                    log.info("StandIn LoRA detected")
+                    log.info("Stand-In LoRA detected")
                     for block in transformer.blocks:
                         block.self_attn.q_loras = LoRALinearLayer(dim, dim, rank=128, device=transformer_load_device, dtype=base_dtype, strength=lora_strength)
                         block.self_attn.k_loras = LoRALinearLayer(dim, dim, rank=128, device=transformer_load_device, dtype=base_dtype, strength=lora_strength)
@@ -1181,6 +1181,8 @@ class WanVideoModelLoader:
                     desc=f"Loading transformer parameters to {transformer_load_device}", 
                     total=param_count,
                     leave=True):
+                if "loras" in name:
+                    continue
                 #print(name, param.dtype, param.device, param.shape)
                 if isinstance(param, GGUFParameter):
                     dtype_to_use = torch.uint8
