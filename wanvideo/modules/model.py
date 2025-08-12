@@ -643,7 +643,6 @@ class WanAttentionBlock(nn.Module):
         self.dense_timesteps = 10
         self.dense_block = False
         self.dense_attention_mode = "sageattn"
-        self.kv_cache = None
 
         # layers
         self.norm1 = WanLayerNorm(out_features, eps)
@@ -745,7 +744,6 @@ class WanAttentionBlock(nn.Module):
             input_x_ip = self.modulate(self.norm1(x_ip), shift_msa_ip, scale_msa_ip)
             self.self_attn.cond_size = input_x_ip.shape[1]
             input_x = torch.concat([input_x, input_x_ip], dim=1)
-            self.kv_cache = None
 
         if camera_embed is not None:
             # encode ReCamMaster camera
@@ -768,21 +766,14 @@ class WanAttentionBlock(nn.Module):
             q=rope_apply_echoshot(q, grid_sizes, freqs, inner_t).to(q)
             k=rope_apply_echoshot(k, grid_sizes, freqs, inner_t).to(k)
         elif x_ip is not None:
-            if self.kv_cache is None:
-                # First pass - separate main and IP components
-                x_main, x_ip_input = input_x[:, : -self.self_attn.cond_size], input_x[:, -self.self_attn.cond_size :]
-                # Compute QKV for main content
-                q, k, v = self.self_attn.qkv_fn(x_main)
-                q, k = apply_rope_comfy(q, k, freqs)
-                
-                # Compute QKV for IP content
-                q_ip, k_ip, v_ip = self.self_attn.qkv_fn_ip(x_ip_input)
-                q_ip, k_ip = apply_rope_comfy(q_ip, k_ip, freqs_ip)
-            else:
-                # Subsequent passes - use cached IP keys/values
-                k_ip = self.kv_cache["k_ip"]
-                v_ip = self.kv_cache["v_ip"]
-                q, k, v = self.self_attn.qkv_fn(input_x)
+            x_main, x_ip_input = input_x[:, : -self.self_attn.cond_size], input_x[:, -self.self_attn.cond_size :]
+            # Compute QKV for main content
+            q, k, v = self.self_attn.qkv_fn(x_main)
+            q, k = apply_rope_comfy(q, k, freqs)
+            
+            # Compute QKV for IP content
+            q_ip, k_ip, v_ip = self.self_attn.qkv_fn_ip(x_ip_input)
+            q_ip, k_ip = apply_rope_comfy(q_ip, k_ip, freqs_ip)
         else:
             q, k, v = self.self_attn.qkv_fn(input_x)
             if self.rope_func == "comfy":
@@ -830,15 +821,7 @@ class WanAttentionBlock(nn.Module):
             else:
                 y = self.self_attn.forward(q, k, v, seq_lens, attention_mode_override="sageattn")
         elif x_ip is not None:
-            if self.kv_cache is None:
-                # First pass: cache IP keys/values and compute attention
-                self.kv_cache = {"k_ip": k_ip.detach(), "v_ip": v_ip.detach()}
-                y = self.self_attn.forward_ip(q, k, v, q_ip, k_ip, v_ip, seq_lens)
-            else:
-                # Subsequent passes: use cached IP keys/values
-                full_k = torch.cat([k, k_ip], dim=1)
-                full_v = torch.cat([v, v_ip], dim=1)
-                y = self.self_attn.forward(q, full_k, full_v, seq_lens)
+            y = self.self_attn.forward_ip(q, k, v, q_ip, k_ip, v_ip, seq_lens)
         else:
             y = self.self_attn.forward(q, k, v, seq_lens)
 

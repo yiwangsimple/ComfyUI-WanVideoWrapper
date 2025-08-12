@@ -36,8 +36,6 @@ VAE_STRIDE = (4, 8, 8)
 PATCH_SIZE = (1, 2, 2)
 
 def offload_transformer(transformer):
-    for block in transformer.blocks:
-        block.kv_cache = None
     transformer.teacache_state.clear_all()
     transformer.magcache_state.clear_all()
     transformer.easycache_state.clear_all()
