@@ -757,8 +757,8 @@ class WanVideoAddStandInLatent:
         return {"required": {
                     "embeds": ("WANVIDIMAGE_EMBEDS",),
                     "ip_image_latent": ("LATENT", {"tooltip": "Reference image to encode"}),
-                    "start_percent": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "Start percent to apply the ref "}),
-                    "end_percent": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "End percent to apply the ref "}),
+                    #"start_percent": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "Start percent to apply the ref "}),
+                    #"end_percent": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "End percent to apply the ref "}),
                 }
         }
 
@@ -767,12 +767,12 @@ class WanVideoAddStandInLatent:
     FUNCTION = "add"
     CATEGORY = "WanVideoWrapper"
 
-    def add(self, embeds, ip_image_latent, start_percent, end_percent):
+    def add(self, embeds, ip_image_latent):
         # Prepare the new extra latent entry
         new_entry = {
             "ip_image_latent": ip_image_latent["samples"],
-            "ip_start_percent": start_percent,
-            "ip_end_percent": end_percent,
+            #"ip_start_percent": start_percent,
+            #"ip_end_percent": end_percent,
         }    
 
         # Return a new dict with updated extra_latents
