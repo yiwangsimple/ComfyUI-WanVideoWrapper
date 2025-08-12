@@ -36,6 +36,8 @@ VAE_STRIDE = (4, 8, 8)
 PATCH_SIZE = (1, 2, 2)
 
 def offload_transformer(transformer):
+    for block in transformer.blocks:
+        block.kv_cache = None
     transformer.teacache_state.clear_all()
     transformer.magcache_state.clear_all()
     transformer.easycache_state.clear_all()
@@ -747,6 +749,36 @@ class WanVideoRealisDanceLatents:
         }
 
         return (add_cond_latents,)
+
+    
+class WanVideoAddStandInLatent:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {
+                    "embeds": ("WANVIDIMAGE_EMBEDS",),
+                    "ip_image_latent": ("LATENT", {"tooltip": "Reference image to encode"}),
+                    "start_percent": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "Start percent to apply the ref "}),
+                    "end_percent": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "End percent to apply the ref "}),
+                }
+        }
+
+    RETURN_TYPES = ("WANVIDIMAGE_EMBEDS",)
+    RETURN_NAMES = ("image_embeds",)
+    FUNCTION = "add"
+    CATEGORY = "WanVideoWrapper"
+
+    def add(self, embeds, ip_image_latent, start_percent, end_percent):
+        # Prepare the new extra latent entry
+        new_entry = {
+            "ip_image_latent": ip_image_latent["samples"],
+            "ip_start_percent": start_percent,
+            "ip_end_percent": end_percent,
+        }    
+
+        # Return a new dict with updated extra_latents
+        updated = dict(embeds)
+        updated["standin_input"] = new_entry
+        return (updated,)
 
 class WanVideoImageToVideoEncode:
     @classmethod
@@ -1882,6 +1914,9 @@ class WanVideoSampler:
             minimax_latents = minimax_latents.to(device, dtype)
             minimax_mask_latents = minimax_mask_latents.to(device, dtype)
 
+        # Stand-In
+        standin_input = image_embeds.get("standin_input", None)
+
         # Context windows
         is_looped = False
         context_reference_latent = None
@@ -2342,6 +2377,7 @@ class WanVideoSampler:
                     "multitalk_audio": multitalk_audio_input if multitalk_audio_embedding is not None else None,
                     "ref_target_masks": ref_target_masks if multitalk_audio_embedding is not None else None,
                     "inner_t": [shot_len] if shot_len else None,
+                    "standin_input": standin_input
                 }
 
                 batch_size = 1
@@ -3453,7 +3489,8 @@ NODE_CLASS_MAPPINGS = {
     "WanVideoTextEncodeCached": WanVideoTextEncodeCached,
     "WanVideoAddExtraLatent": WanVideoAddExtraLatent,
     "WanVideoLatentReScale": WanVideoLatentReScale,
-    "WanVideoScheduler": WanVideoScheduler
+    "WanVideoScheduler": WanVideoScheduler,
+    "WanVideoAddStandInLatent": WanVideoAddStandInLatent,
     }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "WanVideoSampler": "WanVideo Sampler",
@@ -3485,4 +3522,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "WanVideoTextEncodeCached": "WanVideo TextEncode Cached",
     "WanVideoAddExtraLatent": "WanVideo Add Extra Latent",
     "WanVideoLatentReScale": "WanVideo Latent ReScale",
+    "WanVideoAddStandInLatent": "WanVideo Add StandIn Latent"
     }
