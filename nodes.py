@@ -1708,12 +1708,13 @@ class WanVideoSampler:
                     if image_cond_mask is not None:
                         image_cond = torch.cat([image_cond_mask, image_cond])
                 control_latents = control_embeds.get("control_images", None)
+                control_start_percent = control_embeds.get("start_percent", 0.0)
+                control_end_percent = control_embeds.get("end_percent", 1.0)
                 if transformer.control_adapter is not None:
                     control_camera_latents = control_embeds.get("control_camera_latents", None)
                     control_camera_start_percent = control_embeds.get("control_camera_start_percent", 0.0)
                     control_camera_end_percent = control_embeds.get("control_camera_end_percent", 1.0)
-                    control_start_percent = control_embeds.get("start_percent", 0.0)
-                    control_end_percent = control_embeds.get("end_percent", 1.0)
+                
             drop_last = image_embeds.get("drop_last", False)
             has_ref = image_embeds.get("has_ref", False)
         else: #t2v
