@@ -830,6 +830,9 @@ class WanVideoImageToVideoEncode:
         num_frames = ((num_frames - 1) // 4) * 4 + 1
         two_ref_images = start_image is not None and end_image is not None
 
+        if start_image is None and end_image is not None:
+            fun_or_fl2v_model = True # end image alone only works with this option
+
         base_frames = num_frames + (1 if two_ref_images and not fun_or_fl2v_model else 0)
         if temporal_mask is None:
             mask = torch.zeros(1, base_frames, lat_h, lat_w, device=device)
