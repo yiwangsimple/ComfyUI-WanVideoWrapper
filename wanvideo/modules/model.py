@@ -645,6 +645,8 @@ class WanAttentionBlock(nn.Module):
         self.dense_block = False
         self.dense_attention_mode = "sageattn"
 
+        self.kv_cache = None
+
         # layers
         self.norm1 = WanLayerNorm(out_features, eps)
         self.self_attn = WanSelfAttention(in_features, out_features, num_heads, qk_norm,
@@ -745,6 +747,7 @@ class WanAttentionBlock(nn.Module):
             input_x_ip = self.modulate(self.norm1(x_ip), shift_msa_ip, scale_msa_ip)
             self.self_attn.cond_size = input_x_ip.shape[1]
             input_x = torch.concat([input_x, input_x_ip], dim=1)
+            self.kv_cache = None
 
         if camera_embed is not None:
             # encode ReCamMaster camera
@@ -766,7 +769,8 @@ class WanAttentionBlock(nn.Module):
             q, k, v = self.self_attn.qkv_fn(input_x)
             q=rope_apply_echoshot(q, grid_sizes, freqs, inner_t).to(q)
             k=rope_apply_echoshot(k, grid_sizes, freqs, inner_t).to(k)
-        elif x_ip is not None:
+        elif x_ip is not None and self.kv_cache is None:
+            # First pass - separate main and IP components
             x_main, x_ip_input = input_x[:, : -self.self_attn.cond_size], input_x[:, -self.self_attn.cond_size :]
             # Compute QKV for main content
             q, k, v = self.self_attn.qkv_fn(x_main)
@@ -821,8 +825,17 @@ class WanAttentionBlock(nn.Module):
                 y = self.self_attn.forward(q, k, v, seq_lens, attention_mode_override="sageattn_3")
             else:
                 y = self.self_attn.forward(q, k, v, seq_lens, attention_mode_override="sageattn")
-        elif x_ip is not None:
+        elif x_ip is not None and self.kv_cache is None:
+            # First pass: cache IP keys/values and compute attention
+            self.kv_cache = {"k_ip": k_ip.detach(), "v_ip": v_ip.detach()}
             y = self.self_attn.forward_ip(q, k, v, q_ip, k_ip, v_ip, seq_lens)
+        elif self.kv_cache is not None:
+            # Subsequent passes: use cached IP keys/values
+            k_ip = self.kv_cache["k_ip"]
+            v_ip = self.kv_cache["v_ip"]
+            full_k = torch.cat([k, k_ip], dim=1)
+            full_v = torch.cat([v, v_ip], dim=1)
+            y = self.self_attn.forward(q, full_k, full_v, seq_lens)
         else:
             y = self.self_attn.forward(q, k, v, seq_lens)
 
@@ -1479,6 +1492,9 @@ class WanModel(torch.nn.Module):
             List[Tensor]:
                 List of denoised video tensors with original input shapes [C_out, F, H / 8, W / 8]
         """
+        if is_uncond or current_step > 0:
+            standin_input = None
+
         if self.lora_scheduling_enabled:
             for name, submodule in self.named_modules():
                 if isinstance(submodule, nn.Linear):
