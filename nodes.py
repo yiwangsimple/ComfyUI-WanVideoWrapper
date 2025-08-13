@@ -36,6 +36,8 @@ VAE_STRIDE = (4, 8, 8)
 PATCH_SIZE = (1, 2, 2)
 
 def offload_transformer(transformer):
+    for block in transformer.blocks:
+        block.kv_cache = None
     transformer.teacache_state.clear_all()
     transformer.magcache_state.clear_all()
     transformer.easycache_state.clear_all()
@@ -1696,9 +1698,9 @@ class WanVideoSampler:
 
             control_embeds = image_embeds.get("control_embeds", None)
             if control_embeds is not None:
-                if transformer.in_dim not in [52, 48, 32]:
+                if transformer.in_dim not in [52, 48, 36, 32]:
                     raise ValueError("Control signal only works with Fun-Control model")
-                if transformer.in_dim == 52: #fun 2.2 control
+                if transformer.in_dim in [52, 36]: #fun 2.2 control
                     image_cond_mask = image_embeds.get("mask", None)
                     if image_cond_mask is not None:
                         image_cond = torch.cat([image_cond_mask, image_cond])
