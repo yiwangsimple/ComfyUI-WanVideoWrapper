@@ -1806,6 +1806,9 @@ class WanVideoSampler:
                         image_cond = torch.cat([mask_latents, masked_video_latents_input], dim=0).to(device)
                     clip_fea = None
                     fun_ref_image = control_embeds.get("fun_ref_image", None)
+                    if fun_ref_image is not None:
+                        if transformer.ref_conv.weight.dtype in [torch.float8_e4m3fn, torch.float8_e5m2]:
+                            raise ValueError("Fun-Control reference image won't work with this specific fp8_scaled model, it's been fixed in latest version of the model")
                 control_start_percent = control_embeds.get("start_percent", 0.0)
                 control_end_percent = control_embeds.get("end_percent", 1.0)
             else:
