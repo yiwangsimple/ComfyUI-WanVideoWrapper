@@ -774,11 +774,16 @@ class WanAttentionBlock(nn.Module):
             x_main, x_ip_input = input_x[:, : -self.self_attn.cond_size], input_x[:, -self.self_attn.cond_size :]
             # Compute QKV for main content
             q, k, v = self.self_attn.qkv_fn(x_main)
-            q, k = apply_rope_comfy(q, k, freqs)
-            
+            if self.rope_func == "comfy":
+                q, k = apply_rope_comfy(q, k, freqs)
+            elif self.rope_func == "comfy_chunked":
+                q, k = apply_rope_comfy_chunked(q, k, freqs)
             # Compute QKV for IP content
             q_ip, k_ip, v_ip = self.self_attn.qkv_fn_ip(x_ip_input)
-            q_ip, k_ip = apply_rope_comfy(q_ip, k_ip, freqs_ip)
+            if self.rope_func == "comfy":
+                q_ip, k_ip = apply_rope_comfy(q_ip, k_ip, freqs_ip)
+            elif self.rope_func == "comfy_chunked":
+                q_ip, k_ip = apply_rope_comfy_chunked(q_ip, k_ip, freqs_ip)
         else:
             q, k, v = self.self_attn.qkv_fn(input_x)
             if self.rope_func == "comfy":
