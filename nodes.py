@@ -905,13 +905,6 @@ class WanVideoImageToVideoEncode:
             has_ref = True
         y[:, :1] *= start_latent_strength
         y[:, -1:] *= end_latent_strength
-        # if control_embeds is None:
-        #     y = torch.cat([mask, y])
-        # else:
-        #     if end_image is None:
-        #         y[:, 1:] = 0
-        #     elif start_image is None:
-        #         y[:, -1:] = 0
 
         # Calculate maximum sequence length
         patches_per_frame = lat_h * lat_w // (PATCH_SIZE[1] * PATCH_SIZE[2])
@@ -1745,10 +1738,7 @@ class WanVideoSampler:
                 print("control_embeds:", control_embeds)
                 if transformer.in_dim not in [52, 48, 36, 32]:
                     raise ValueError("Control signal only works with Fun-Control model")
-                # if transformer.in_dim == 52 or transformer.control_adapter is not None: #fun 2.2 control
-                #     image_cond_mask = image_embeds.get("mask", None)
-                #     if image_cond_mask is not None:
-                #         image_cond = torch.cat([image_cond_mask, image_cond])
+
                 control_latents = control_embeds.get("control_images", None)
                 control_start_percent = control_embeds.get("start_percent", 0.0)
                 control_end_percent = control_embeds.get("end_percent", 1.0)
