@@ -11,3 +11,5 @@ opencv-python
 scipy
 triton
 sageattention
+onnx 
+onnxruntime-gpu
